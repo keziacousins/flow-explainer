@@ -6,6 +6,7 @@ import { Graph } from './engine/graph';
 import { GroupView } from './engine/group';
 import { NodeView } from './engine/node';
 import { routeEdges } from './engine/routing';
+import { RuntimeLayer } from './engine/runtime';
 import { Stage } from './engine/stage';
 import { Traffic } from './engine/traffic';
 import { mountUI } from './engine/ui';
@@ -26,17 +27,19 @@ const edges = new Map(
 const groups = new Map(
   estate.groups.map((m) => [m.id, new GroupView(m, m.members.map((id) => nodes.get(id)!), labelLayer)]),
 );
-const traffic = new Traffic(graph, nodes, edges);
+const runtime = new RuntimeLayer(graph, nodes, labelLayer);
+const traffic = new Traffic(graph, nodes, edges, runtime);
 
 for (const g of groups.values()) stage.scene.add(g.group);
 for (const n of nodes.values()) stage.scene.add(n.group);
 for (const e of edges.values()) stage.scene.add(e.group);
-stage.scene.add(traffic.mesh);
+stage.scene.add(runtime.group, traffic.logical.mesh, traffic.underneath.mesh);
 
 stage.onTick((time, delta) => {
   for (const g of groups.values()) g.update(stage);
   for (const n of nodes.values()) n.update(time, delta, stage);
   for (const e of edges.values()) e.update(stage);
+  runtime.update(delta, stage);
   traffic.tick(delta);
 });
 
@@ -44,7 +47,7 @@ document.querySelector('.deck-name')!.textContent = estate.title;
 document.querySelector('.deck-sub')!.textContent = estate.subtitle;
 document.title = estate.title;
 
-const director = new Director(stage, graph, nodes, edges, groups, traffic);
+const director = new Director(stage, graph, nodes, edges, groups, runtime, traffic);
 mountUI(director);
 mountViewControls(stage, director);
 

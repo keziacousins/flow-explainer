@@ -98,8 +98,7 @@ export class EdgeView {
     if (this.label) {
       this.label.style.visibility = visible ? 'visible' : 'hidden';
       if (!visible) return;
-      const [sx, sy] = stage.toScreen(this.mid.x, this.mid.y);
-      this.label.style.transform = `translate3d(${sx}px, ${sy}px, 0) translate(-50%, -130%)`;
+      this.label.style.transform = stage.labelTransform(this.mid.x, this.mid.y, 0, 'translate(-50%, -130%)');
       this.label.style.opacity = String(smoothstep(0.7, 1, appear) * this.brightness);
     }
   }

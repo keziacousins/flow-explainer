@@ -103,7 +103,7 @@ interface SetInput {
   role?: Role;
   shape?: Shape;
   size?: [number, number];
-  runtime?: Runtime;
+  runtime?: Runtime | ((key: string, i: number) => Runtime | undefined);
   layout: Layout;
 }
 
@@ -120,8 +120,10 @@ interface StreamInput extends Omit<StreamModel, 'from' | 'to'> {
   to: Refs;
 }
 
-interface SceneInput extends Omit<SceneModel, 'show' | 'highlight' | 'focus' | 'camera' | 'groups' | 'streams'> {
+interface SceneInput
+  extends Omit<SceneModel, 'show' | 'highlight' | 'focus' | 'camera' | 'groups' | 'streams' | 'runtime'> {
   show: Refs;
+  runtime?: Refs;
   highlight?: Refs;
   focus?: Refs;
   camera?: Refs;
@@ -144,7 +146,7 @@ export class FlowBuilder {
     return this;
   }
 
-  /** Go back to the node the packet came from. */
+  /** Go back one step along the way the packet came. Repeated calls keep unwinding. */
   respond(opts: HopOptions = {}) {
     this.steps.push({ op: 'respond', opts: { kind: 'response', ...opts } });
     return this;
@@ -202,10 +204,13 @@ export class DiagramBuilder {
     this.claim(id);
     const positions = input.layout(keys.length);
     const labels = keys.map((key, i) => input.label(key, i));
+    const runtimes = keys.map((key, i) =>
+      typeof input.runtime === 'function' ? input.runtime(key, i) : input.runtime,
+    );
     // Members share one width, wide enough for the longest label.
     const shape = input.shape ?? 'box';
     const [w, h] = input.size ?? DEFAULT_SIZE[shape];
-    const width = Math.max(w, ...labels.map((l) => labelWidth(l, shape, input.runtime)));
+    const width = Math.max(w, ...labels.map((l, i) => labelWidth(l, shape, runtimes[i])));
     const byKey = new Map<string, string>();
     keys.forEach((key, i) => {
       const nodeId = this.node(`${id}.${key}`, {
@@ -214,7 +219,7 @@ export class DiagramBuilder {
         role: input.role,
         shape,
         size: [width, h],
-        runtime: input.runtime,
+        runtime: runtimes[i],
         at: positions[i],
       });
       byKey.set(key, nodeId);
@@ -262,6 +267,7 @@ export class DiagramBuilder {
       focus: optional(input.focus),
       camera: optional(input.camera),
       groups: optional(input.groups),
+      runtime: optional(input.runtime),
       streams: input.streams?.map((s) => ({ ...s, from: selector(s.from), to: selector(s.to) })),
     });
   }
@@ -328,7 +334,7 @@ function validate(model: Model) {
 
   model.scenes.forEach((scene, i) => {
     const where = `scene ${i + 1} ("${scene.title}")`;
-    for (const sel of [scene.show, scene.highlight, scene.focus, scene.camera, scene.groups]) {
+    for (const sel of [scene.show, scene.highlight, scene.focus, scene.camera, scene.groups, scene.runtime]) {
       check(where, () => {
         graph.nodeIds(sel);
         graph.edgeIds(sel);

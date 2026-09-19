@@ -6,8 +6,15 @@ import type { GroupView } from './group';
 import type { SceneModel } from './model';
 import type { NodeView } from './node';
 import { reducedMotion } from './palette';
+import type { RuntimeLayer } from './runtime';
 import type { Stage } from './stage';
 import type { Traffic } from './traffic';
+
+/** Default camera angles when a scene shows the runtime layer: from above, off to one side. */
+const RUNTIME_TILT = 62;
+const RUNTIME_TURN = -38;
+/** Default fog when the runtime layer is showing. */
+const RUNTIME_FOG = 0.15;
 
 export interface SceneChange {
   index: number;
@@ -34,13 +41,12 @@ export class Director {
     private nodes: Map<string, NodeView>,
     private edges: Map<string, EdgeView>,
     private groups: Map<string, GroupView>,
+    private runtime: RuntimeLayer,
     private traffic: Traffic,
   ) {
     stage.onResize(() => {
       if (this.index < 0 || this.cameraFree) return;
-      const frame = this.framing(this.scenes[this.index]);
-      this.stage.camera.position.set(frame.x, frame.y, this.stage.camera.position.z);
-      this.stage.camera.zoom = frame.zoom;
+      Object.assign(this.stage.view, this.framing(this.scenes[this.index]));
     });
   }
 
@@ -77,6 +83,7 @@ export class Director {
     const focusEdges = scene.focus ? graph.edgeIds(scene.focus) : null;
     const shownGroups = new Set(parts(scene.groups));
     const onUse = scene.reveal === 'onUse';
+    const underneath = graph.nodeIds(scene.runtime);
 
     // New things build in left to right, following the usual direction of flow.
     const nodes = [...this.nodes.values()].sort((a, b) => a.model.pos[0] - b.model.pos[0]);
@@ -129,15 +136,22 @@ export class Director {
       tl.to(group.state, { appear: on ? 1 : 0, dim: focused ? 0 : 1, duration: on ? 0.8 : 0.4 }, on ? 0.2 : 0);
     }
 
-    const frame = this.framing(scene);
-    const camera = this.stage.camera;
-    if (first) {
-      camera.position.set(frame.x, frame.y, camera.position.z);
-      camera.zoom = frame.zoom;
-    } else {
-      tl.to(camera.position, { x: frame.x, y: frame.y, duration: 1.4, ease: 'power3.inOut' }, 0);
-      tl.to(camera, { zoom: frame.zoom, duration: 1.4, ease: 'power3.inOut' }, 0);
+    // Runtime instances rise into view after the camera has started to lean back.
+    const clusters = [...this.runtime.clusters.entries()].sort((a, b) => a[1].node.model.pos[0] - b[1].node.model.pos[0]);
+    const rising = clusters.filter(([id, c]) => underneath.has(id) && c.state.appear < 1);
+    const clusterStagger = Math.min(0.08, 1 / Math.max(rising.length, 1));
+    for (const [id, cluster] of clusters) {
+      const on = underneath.has(id);
+      const k = rising.findIndex(([r]) => r === id);
+      if (k >= 0) tl.to(cluster.state, { appear: 1, duration: 0.8, ease: 'power2.out' }, 0.7 + clusterStagger * k);
+      else if (!on && cluster.state.appear > 0) tl.to(cluster.state, { appear: 0, duration: 0.5, ease: 'power1.in' }, 0);
+      tl.to(cluster.state, { dim: focusNodes && !focusNodes.has(id) ? 1 : 0, duration: 0.8 }, 0.4);
     }
+    tl.to(this.runtime.state, { fog: underneath.size ? (scene.fog ?? RUNTIME_FOG) : 1, duration: 1.2 }, 0.3);
+
+    const view = this.framing(scene);
+    if (first) Object.assign(this.stage.view, view);
+    else tl.to(this.stage.view, { ...view, duration: 1.6, ease: 'power3.inOut' }, 0);
 
     if (reducedMotion) tl.timeScale(3);
 
@@ -148,11 +162,8 @@ export class Director {
   reframe() {
     if (this.index < 0) return;
     this.cameraFree = false;
-    const frame = this.framing(this.scenes[this.index]);
-    const camera = this.stage.camera;
-    const duration = reducedMotion ? 0.3 : 0.9;
-    gsap.to(camera.position, { x: frame.x, y: frame.y, duration, ease: 'power3.inOut' });
-    gsap.to(camera, { zoom: frame.zoom, duration, ease: 'power3.inOut' });
+    const view = this.framing(this.scenes[this.index]);
+    gsap.to(this.stage.view, { ...view, duration: reducedMotion ? 0.3 : 0.9, ease: 'power3.inOut' });
   }
 
   private accentOf(scene: SceneModel) {
@@ -163,13 +174,22 @@ export class Director {
     return node ? `#${node.accent.getHexString()}` : null;
   }
 
+  /** The view for a scene: its angles, and the position and zoom that fit its nodes. */
   private framing(scene: SceneModel) {
-    const box = new THREE.Box2();
+    const underneath = this.graph.nodeIds(scene.runtime);
+    const tilt = scene.tilt ?? (underneath.size ? RUNTIME_TILT : 0);
+    const turn = scene.turn ?? (underneath.size ? RUNTIME_TURN : 0);
+    const points: THREE.Vector3[] = [];
     for (const id of this.graph.nodeIds(scene.camera ?? scene.show)) {
       const node = this.nodes.get(id);
-      if (node) box.union(node.bounds);
+      if (!node) continue;
+      const { min, max } = node.bounds;
+      points.push(new THREE.Vector3(min.x, min.y, 0), new THREE.Vector3(max.x, max.y, 0));
+      points.push(new THREE.Vector3(min.x, max.y, 0), new THREE.Vector3(max.x, min.y, 0));
+      const cluster = this.runtime.clusters.get(id);
+      if (cluster && underneath.has(id)) points.push(...cluster.corners);
     }
-    return this.stage.framing(box);
+    return { ...this.stage.framing(points, tilt, turn), tilt, turn };
   }
 }
 

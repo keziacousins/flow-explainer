@@ -99,9 +99,13 @@ export class GroupView {
     this.material.opacity = appear;
     this.fillMaterial.opacity = appear * 0.5 * brightness;
 
-    const [sx, sy] = stage.toScreen(this.corner.x, this.corner.y);
     const inset = stage.pixelsPerUnit * 0.3;
-    this.label.style.transform = `translate3d(${sx + inset}px, ${sy + inset * 0.7}px, 0)`;
+    this.label.style.transform = stage.labelTransform(
+      this.corner.x,
+      this.corner.y,
+      0,
+      `translate(${inset}px, ${inset * 0.7}px)`,
+    );
     this.label.style.opacity = String(smoothstep(0.4, 1, appear) * brightness);
   }
 }

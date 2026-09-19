@@ -6,6 +6,8 @@ const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 5;
 /** Pointer travel, in pixels, before a press becomes a drag instead of a click. */
 const DRAG_THRESHOLD = 4;
+/** Degrees of tilt or turn per pixel of option-drag. */
+const ORBIT_RATE = 0.25;
 
 /** Safari's non-standard pinch event. */
 interface GestureEvent extends UIEvent {
@@ -16,38 +18,23 @@ interface GestureEvent extends UIEvent {
 
 /**
  * Trackpad and mouse navigation. Pinch (or ctrl + scroll) zooms at the pointer,
- * two-finger scroll or drag pans. Taking over the camera stops any scene camera move
- * until the view is reset or the scene changes.
+ * two-finger scroll or drag pans, option + drag tilts and turns. Taking over the
+ * camera stops any scene camera move until the view is reset or the scene changes.
  */
 export function mountViewControls(stage: Stage, director: Director) {
   const app = document.getElementById('app')!;
   const surface = document.getElementById('stage')!;
   const reset = document.querySelector<HTMLButtonElement>('#nav .reset')!;
-  const camera = stage.camera;
+  const view = stage.view;
 
   const takeOver = () => {
-    gsap.killTweensOf([camera, camera.position]);
+    gsap.killTweensOf(view);
     director.cameraFree = true;
     reset.hidden = false;
   };
 
-  const pan = (dx: number, dy: number) => {
-    const ppu = stage.pixelsPerUnit;
-    camera.position.x += dx / ppu;
-    camera.position.y -= dy / ppu;
-  };
-
-  // Keep the world point under the pointer fixed while zooming.
-  const zoomAt = (clientX: number, clientY: number, zoom: number) => {
-    const rect = surface.getBoundingClientRect();
-    const sx = clientX - rect.left - stage.width / 2;
-    const sy = clientY - rect.top - stage.height / 2;
-    const before = stage.pixelsPerUnit;
-    camera.zoom = Math.min(Math.max(zoom, MIN_ZOOM), MAX_ZOOM);
-    const after = stage.pixelsPerUnit;
-    camera.position.x += sx / before - sx / after;
-    camera.position.y -= sy / before - sy / after;
-  };
+  const zoomAt = (clientX: number, clientY: number, zoom: number) =>
+    stage.zoomAt(clientX, clientY, Math.min(Math.max(zoom, MIN_ZOOM), MAX_ZOOM));
 
   let gesturing = false;
 
@@ -62,9 +49,9 @@ export function mountViewControls(stage: Stage, director: Director) {
       if (e.ctrlKey) {
         // Trackpad pinch arrives as ctrl + wheel. Clamp so a mouse wheel notch isn't a jump.
         const dy = Math.min(Math.max(e.deltaY * unit, -50), 50);
-        zoomAt(e.clientX, e.clientY, camera.zoom * Math.exp(-dy * 0.01));
+        zoomAt(e.clientX, e.clientY, view.zoom * Math.exp(-dy * 0.01));
       } else {
-        pan(e.deltaX * unit, e.deltaY * unit);
+        stage.panBy(e.deltaX * unit, e.deltaY * unit);
       }
     },
     { passive: false },
@@ -75,7 +62,7 @@ export function mountViewControls(stage: Stage, director: Director) {
     e.preventDefault();
     gesturing = true;
     takeOver();
-    gestureStartZoom = camera.zoom;
+    gestureStartZoom = view.zoom;
   });
   app.addEventListener('gesturechange', (e) => {
     e.preventDefault();
@@ -87,12 +74,12 @@ export function mountViewControls(stage: Stage, director: Director) {
     gesturing = false;
   });
 
-  let press: { startX: number; startY: number; x: number; y: number } | null = null;
+  let press: { startX: number; startY: number; x: number; y: number; orbit: boolean } | null = null;
   let dragged = false;
 
   surface.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
-    press = { startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY };
+    press = { startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, orbit: e.altKey };
     dragged = false;
     surface.setPointerCapture(e.pointerId);
   });
@@ -105,7 +92,10 @@ export function mountViewControls(stage: Stage, director: Director) {
       takeOver();
       surface.classList.add('is-dragging');
     }
-    pan(press.x - e.clientX, press.y - e.clientY);
+    const dx = e.clientX - press.x;
+    const dy = e.clientY - press.y;
+    if (press.orbit) stage.orbitBy(-dy * ORBIT_RATE, -dx * ORBIT_RATE);
+    else stage.panBy(-dx, -dy);
     press.x = e.clientX;
     press.y = e.clientY;
   });

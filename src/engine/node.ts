@@ -23,6 +23,8 @@ export class NodeView {
   readonly state: NodeState = { appear: 0, glow: 0, dim: 0 };
   readonly group = new THREE.Group();
   readonly accent: THREE.Color;
+  /** How visible this node's runtime tower is, 0 to 1. Set by the runtime layer. */
+  underneath = 0;
 
   /** Brief flash when a packet arrives. Decays on its own. */
   private pulse = 0;
@@ -35,6 +37,8 @@ export class NodeView {
   private stack: { fill: THREE.MeshBasicMaterial; border: LineMaterial }[] = [];
   private haloMaterial: THREE.ShaderMaterial;
   private label: HTMLElement;
+  /** Places the label within the node, or beneath it for actors. */
+  private labelOffset: string;
   private segments: number;
   private rest: THREE.Color;
   private hot: THREE.Color;
@@ -110,6 +114,10 @@ export class NodeView {
     this.group.add(halo, fill, border);
     this.group.position.set(model.pos[0], model.pos[1], 0);
 
+    this.labelOffset =
+      model.shape === 'actor'
+        ? `translate(-50%, calc(var(--ppu) * ${h / 2 + 0.25} * 1px))`
+        : 'translate(-50%, -50%)';
     this.label = document.createElement('div');
     this.label.className = `node-label shape-${model.shape}`;
     this.label.style.setProperty('--w', String(w));
@@ -167,9 +175,11 @@ export class NodeView {
       .lerp(this.hot, heat)
       .lerp(this.errorHot, alarm)
       .multiplyScalar(brightness);
+    // Stacked cards hint at multiplicity; once the real tower is showing they're redundant.
+    const cards = 1 - this.underneath;
     for (const layer of this.stack) {
-      layer.border.color.copy(this.rest).multiplyScalar(0.55 * brightness);
-      layer.fill.opacity = smoothstep(0.2, 1, appear) * 0.94;
+      layer.border.color.copy(this.rest).multiplyScalar(0.55 * brightness * cards);
+      layer.fill.opacity = smoothstep(0.2, 1, appear) * 0.94 * cards;
     }
 
     const halo = this.haloMaterial.uniforms;
@@ -177,12 +187,12 @@ export class NodeView {
     halo.uStrength.value = Math.max(heat, alarm) * brightness * appear;
     this.haloMaterial.visible = halo.uStrength.value > 0.01;
 
-    this.fillMaterial.opacity = smoothstep(0.2, 1, appear) * 0.94;
+    // Dimmed nodes also turn translucent, so they don't hide what's beneath the sheet.
+    this.fillMaterial.opacity = smoothstep(0.2, 1, appear) * 0.94 * (1 - 0.6 * dim);
     this.fillMaterial.color.copy(this.fillRest).lerp(this.fillHot, Math.max(glow, this.pulse));
 
-    const [sx, sy] = stage.toScreen(this.model.pos[0], this.model.pos[1]);
     const legible = stage.pixelsPerUnit * LABEL_EM >= MIN_LABEL_PX;
-    this.label.style.transform = `translate3d(${sx}px, ${sy}px, 0) translate(-50%, -50%)`;
+    this.label.style.transform = stage.labelTransform(this.model.pos[0], this.model.pos[1], 0, this.labelOffset);
     this.label.style.opacity = legible ? String(smoothstep(0.5, 1, appear) * (1 - 0.6 * dim)) : '0';
     this.label.classList.toggle('is-hot', heat > 0.5);
   }

@@ -12,6 +12,12 @@ export type Side = 'left' | 'right' | 'top' | 'bottom';
 export interface Runtime {
   kind: 'replicas' | 'shards' | 'partitions';
   count: number;
+  /**
+   * Which instances a request reaches. `any`: one, load-balanced. `all`: every one,
+   * scatter-gather. `key`: one, chosen by key. Defaults: replicas `any`, shards `all`,
+   * partitions `key`.
+   */
+  route?: Route;
 }
 
 /**
@@ -49,6 +55,7 @@ export interface GroupModel {
 }
 
 export type PacketKind = 'request' | 'response' | 'error';
+export type Route = 'any' | 'all' | 'key';
 
 export interface HopOptions {
   kind?: PacketKind;
@@ -64,6 +71,8 @@ export interface HopOptions {
   size?: number;
   /** Seconds the receiving node spends before the next step. */
   hold?: number;
+  /** Override which runtime instances this hop reaches, e.g. `key` for a write to one shard. */
+  route?: Route;
 }
 
 export type FlowStep =
@@ -71,7 +80,7 @@ export type FlowStep =
   | { op: 'send'; to: Selector; opts: HopOptions }
   /** Split into one packet per node matching `to` that is connected to the current node. */
   | { op: 'fanout'; to: Selector; opts: HopOptions }
-  /** Go back to the node the packet came from. */
+  /** Go back one step along the way the packet came, to the instance that sent it. */
   | { op: 'respond'; opts: HopOptions }
   /** Every packet travels to `to`; the flow continues as one packet once all have arrived. */
   | { op: 'gather'; to: string; opts: HopOptions }
@@ -97,6 +106,8 @@ export interface StreamModel {
   /** Packets sent together each time. */
   burst?: number;
   kind?: PacketKind;
+  /** Override which runtime instances each packet reaches. */
+  route?: Route;
 }
 
 export interface PlayModel {
@@ -126,6 +137,14 @@ export interface SceneModel {
   play?: PlayModel[];
   /** `onUse`: edges stay hidden until a packet travels them, drawing the line as it goes. */
   reveal?: 'eager' | 'onUse';
+  /** Nodes whose runtime instances are shown on the layer beneath. */
+  runtime?: Selector;
+  /** Camera lean in degrees; 0 looks straight down. Defaults to 58 when `runtime` is set. */
+  tilt?: number;
+  /** Camera rotation around the vertical, in degrees. Defaults to -32 when `runtime` is set. */
+  turn?: number;
+  /** How much the sheet the diagram sits on hides the towers beneath it, 0 to 1. */
+  fog?: number;
 }
 
 export interface Model {

@@ -31,6 +31,7 @@ const fetchers = d.set('fetcher', providerKeys, {
   role: 'service',
   size: [3.3, 0.95],
   layout: column([-20.4, 0], 1.3),
+  runtime: { kind: 'replicas', count: 2 },
 });
 
 const scheduler = d.node('scheduler', { label: 'Fetch scheduler', detail: 'Cron and backoff', at: [-15.5, 5.2] });
@@ -42,7 +43,13 @@ const partners = d.node('partners', {
   size: [2.8, 1.1],
   at: [-25, -6],
 });
-const push = d.node('push', { label: 'Push gateway', detail: 'Webhooks', role: 'edge', at: [-15.5, -6] });
+const push = d.node('push', {
+  label: 'Push gateway',
+  detail: 'Webhooks',
+  role: 'edge',
+  at: [-15.5, -6],
+  runtime: { kind: 'replicas', count: 3 },
+});
 const normaliser = d.node('normaliser', {
   label: 'Normaliser',
   detail: 'Maps to one schema',
@@ -71,6 +78,7 @@ const projectors = d.set('projector', Object.keys(projectorNames), {
   role: 'async',
   size: [3.4, 1.1],
   layout: column([0.2, 0], 2.3),
+  runtime: { kind: 'replicas', count: 3 },
 });
 
 const index = d.node('index', {
@@ -80,14 +88,22 @@ const index = d.node('index', {
   at: [5.4, 3.45],
   runtime: { kind: 'shards', count: 30 },
 });
-const rates = d.node('rates', { label: 'Rate cache', detail: 'Redis', role: 'data', shape: 'db', at: [5.4, 1.15] });
+const rates = d.node('rates', {
+  label: 'Rate cache',
+  detail: 'Redis',
+  role: 'data',
+  shape: 'db',
+  at: [5.4, 1.15],
+  runtime: { kind: 'replicas', count: 3 },
+});
 const inventory = d.node('inventory', {
   label: 'Inventory DB',
   detail: 'Cassandra',
   role: 'data',
   shape: 'db',
   at: [5.4, -1.15],
-  runtime: { kind: 'shards', count: 12 },
+  // Lookups go to the shard that owns the hotel, not to every shard.
+  runtime: { kind: 'shards', count: 12, route: 'key' },
 });
 const content = d.node('content', {
   label: 'Content store',
@@ -110,6 +126,7 @@ const subgraphs = d.set('subgraph', Object.keys(subgraphNames), {
   label: (k) => `${subgraphNames[k]} subgraph`,
   size: [3.5, 1.1],
   layout: column([10.6, 0], 2.3),
+  runtime: (k) => ({ kind: 'replicas', count: { search: 8, pricing: 6, availability: 6, content: 4 }[k]! }),
 });
 const router = d.node('router', {
   label: 'GraphQL router',
@@ -144,7 +161,8 @@ d.group('api', 'Search API', [router, subgraphs]);
 // Flows
 
 const intoTopic = (f: FlowBuilder) => f.send(raw).send(normaliser).send(changes);
-const project = (f: FlowBuilder) => f.fanout(projectors, { stagger: 0.05 }).send('reads');
+// Writes go to the one shard that owns the hotel, even where reads fan out to every shard.
+const project = (f: FlowBuilder) => f.fanout(projectors, { stagger: 0.05 }).send('reads', { route: 'key' });
 
 d.flow('fetch-one', scheduler, (f) =>
   intoTopic(f.send(fetchers.get('bedbank')).send(providers).respond({ packets: 4, gap: 0.1 })),
@@ -174,10 +192,15 @@ const query = (id: string, parts: string[]) =>
       .send('reads')
       .respond()
       .gather(router, { kind: 'response' })
-      .send(shoppers, { kind: 'response' }),
+      .respond(),
   );
 query('hotel-search', ['search', 'pricing', 'availability']);
 query('hotel-page', ['content', 'pricing', 'availability']);
+
+// One search, followed all the way to the index and back.
+d.flow('index-search', shoppers, (f) =>
+  f.send(router).send(subgraphs.get('search')).send(index).respond().respond().respond(),
+);
 
 // Scenes
 
@@ -188,7 +211,7 @@ const ambient = [
   { from: [raw, push], to: normaliser, rate: 0.7 },
   { from: normaliser, to: changes, rate: 1.1 },
   { from: changes, to: projectors, rate: 0.7 },
-  { from: projectors, to: 'reads', rate: 0.7 },
+  { from: projectors, to: 'reads', rate: 0.7, route: 'key' as const },
   { from: shoppers, to: router, rate: 1.4 },
   { from: router, to: subgraphs, rate: 0.9 },
   { from: subgraphs, to: 'reads', rate: 0.9 },
@@ -284,11 +307,40 @@ d.scene({
 });
 
 d.scene({
+  title: 'One box, thirty machines',
+  body: 'Beneath each box hangs what it really runs as. Each search lands on one of 12 router replicas and one of 8 search replicas, then fans out to all 30 index shards. The answers gather back to the replica that asked.',
+  show: ['api', 'reads', shoppers],
+  groups: ['api', 'reads'],
+  runtime: [router, subgraphs.get('search'), index],
+  highlight: [index],
+  focus: [index, subgraphs.get('search'), router, shoppers],
+  play: [
+    { flow: 'index-search', pause: 0.5 },
+    { flow: 'index-search', delay: 1.4, pause: 0.5 },
+  ],
+});
+
+d.scene({
+  title: 'Ingestion, one layer down',
+  body: 'Each fetcher runs as two replicas. Changes are keyed by hotel, so each lands on one of 24 Kafka partitions. Projectors then write to the one shard that owns the hotel, not all of them.',
+  show: ['sources', 'ingestion', 'projection', 'reads'],
+  groups: ['sources', 'ingestion', 'projection', 'reads'],
+  runtime: ['ingestion', 'projection', 'reads'],
+  highlight: [changes],
+  turn: 30,
+  play: [{ flow: 'refresh', pause: 1.5 }],
+});
+
+d.scene({
   title: 'The whole estate',
-  body: 'Both halves at once: background traffic everywhere, with a refresh and two kinds of search running through it.',
+  body: 'Two dozen logical services, running as about 140 instances. The same flows move through both layers at once.',
   show: '*',
   groups: '*',
-  streams: ambient.map((s) => ({ ...s, rate: s.rate * 0.6 })),
+  runtime: '*',
+  tilt: 60,
+  turn: -40,
+  fog: 0.3,
+  streams: ambient.map((s) => ({ ...s, rate: s.rate * 0.5 })),
   play: [
     { flow: 'refresh', pause: 3 },
     { flow: 'hotel-search', delay: 1, pause: 1.2 },

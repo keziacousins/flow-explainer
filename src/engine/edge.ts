@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import type { Text } from 'troika-three-text';
 import type { EdgeModel } from './model';
 import { smoothstep, type NodeView } from './node';
 import { palette } from './palette';
 import type { Stage } from './stage';
+import { makeText } from './text';
 
 const SEGMENTS = 96;
 /** Points in the lookup table packets sample from. */
@@ -29,20 +31,17 @@ export class EdgeView {
   private hot: THREE.Color;
   /** Evenly spaced points along the curve, so packets don't do arc-length maths per frame. */
   private table = new Float32Array((SAMPLES + 1) * 2);
-  private label?: HTMLElement;
-  private mid: THREE.Vector3;
+  private label?: Text;
 
   constructor(
     readonly model: EdgeModel,
     curve: THREE.Curve<THREE.Vector3>,
     readonly from: NodeView,
     readonly to: NodeView,
-    labelLayer: HTMLElement,
   ) {
     this.id = model.id;
     this.hot = from.accent.clone().multiplyScalar(2.2);
     this.length = curve.getLength();
-    this.mid = curve.getPointAt(0.5);
 
     curve.getSpacedPoints(SAMPLES).forEach((p, i) => {
       this.table[i * 2] = p.x;
@@ -66,10 +65,10 @@ export class EdgeView {
     this.group.add(line);
 
     if (model.label) {
-      this.label = document.createElement('div');
-      this.label.className = 'edge-label';
-      this.label.textContent = model.label;
-      labelLayer.appendChild(this.label);
+      const mid = curve.getPointAt(0.5);
+      this.label = makeText({ text: model.label, size: 0.18, color: '#7C8BA5', anchorX: 'center', anchorY: 'bottom' });
+      this.label.position.set(mid.x, mid.y + 0.08, 0.004);
+      this.group.add(this.label);
     }
   }
 
@@ -96,10 +95,8 @@ export class EdgeView {
     this.material.color.copy(this.rest).lerp(this.hot, glow).multiplyScalar(this.brightness);
 
     if (this.label) {
-      this.label.style.visibility = visible ? 'visible' : 'hidden';
-      if (!visible) return;
-      this.label.style.transform = stage.labelTransform(this.mid.x, this.mid.y, 0, 'translate(-50%, -130%)');
-      this.label.style.opacity = String(smoothstep(0.7, 1, appear) * this.brightness);
+      this.label.fillOpacity = smoothstep(0.7, 1, appear) * this.brightness;
+      this.label.visible = stage.pixelsPerUnit * 0.18 >= 4;
     }
   }
 }

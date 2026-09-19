@@ -4,13 +4,16 @@ import { palette } from './palette';
 
 /** World units visible vertically on the logical plane at zoom 1. */
 export const VIEW_HEIGHT = 14;
-/** Vertical field of view. Narrow, so looking straight down reads as a flat diagram. */
-const FOV = 30;
+/** Vertical field of view for perspective scenes. */
+export const PERSPECTIVE_FOV = 30;
+/** So narrow it's effectively a parallel (axonometric) projection, but still tweenable. */
+export const PARALLEL_FOV = 3;
 const MAX_TILT = 80;
 const MAX_ZOOM = 1.7;
-const TAN_V = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
-/** Camera distance that shows VIEW_HEIGHT units at zoom 1. */
-const BASE_DISTANCE = VIEW_HEIGHT / 2 / TAN_V;
+
+const tanHalf = (fov: number) => Math.tan(THREE.MathUtils.degToRad(fov / 2));
+/** Camera distance that shows VIEW_HEIGHT units on the plane at zoom 1. */
+const baseDistance = (fov: number) => VIEW_HEIGHT / 2 / tanHalf(fov);
 
 type Ticker = (time: number, delta: number) => void;
 
@@ -23,17 +26,19 @@ export interface View {
   tilt: number;
   /** Rotation around the vertical axis. */
   turn: number;
+  /** Vertical field of view. Narrowing it towards PARALLEL_FOV flattens perspective. */
+  fov: number;
 }
 
-export type Framing = Omit<View, 'tilt' | 'turn'>;
+export type Framing = Pick<View, 'x' | 'y' | 'zoom'>;
 
 /** Renderer, perspective camera, bloom and the frame loop. */
 export class Stage {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 2000);
+  readonly camera = new THREE.PerspectiveCamera(PERSPECTIVE_FOV, 1, 0.5, 2000);
   /** The camera is driven from this; tween it rather than the camera itself. */
-  readonly view: View = { x: 0, y: 0, zoom: 1, tilt: 0, turn: 0 };
+  readonly view: View = { x: 0, y: 0, zoom: 1, tilt: 0, turn: 0, fov: PERSPECTIVE_FOV };
   readonly grid: THREE.Points;
   width = 0;
   height = 0;
@@ -111,23 +116,6 @@ export class Stage {
     return [((v.x + 1) / 2) * this.width, ((1 - v.y) / 2) * this.height];
   }
 
-  /** How much bigger things at this point look than at the point the camera looks at. */
-  scaleAt(x: number, y: number, z = 0) {
-    const cam = this.camera.position;
-    const depth = (x - cam.x) * this.forward.x + (y - cam.y) * this.forward.y + (z - cam.z) * this.forward.z;
-    return depth > 0 ? this.distance / depth : 1;
-  }
-
-  /**
-   * CSS transform placing an HTML label at a world point. Labels face the camera, so
-   * text stays legible, and scale with distance like everything else.
-   */
-  labelTransform(x: number, y: number, z = 0, then = 'translate(-50%, -50%)') {
-    const [sx, sy] = this.toScreen(x, y, z);
-    const k = this.scaleAt(x, y, z);
-    return `translate3d(${sx}px, ${sy}px, 0) scale(${k.toFixed(4)}) ${then}`;
-  }
-
   /** The point on the logical plane under a screen position. */
   groundAt(clientX: number, clientY: number): THREE.Vector3 {
     const rect = this.container.getBoundingClientRect();
@@ -170,10 +158,12 @@ export class Stage {
    * View that fits `points` for the given angles, keeping them between the title and
    * the caption. Perspective makes this non-linear, so it refines a few times.
    */
-  framing(points: THREE.Vector3[], tilt: number, turn: number): Framing {
+  framing(points: THREE.Vector3[], tilt: number, turn: number, fov: number): Framing {
     const { right, up, dir, forward } = basis(tilt, turn);
     const aspect = this.width / this.height;
-    const tanH = TAN_V * aspect;
+    const tanV = tanHalf(fov);
+    const base = baseDistance(fov);
+    const tanH = tanV * aspect;
     const pad = 0.08;
     // The band of the screen available, in normalised device coordinates.
     const bottom = -1 + 2 * this.captionReserve;
@@ -186,7 +176,7 @@ export class Stage {
     // Start far enough back that everything is well in front of the camera.
     let radius = 0;
     for (const p of points) radius = Math.max(radius, p.distanceTo(target));
-    let distance = Math.max(BASE_DISTANCE, (radius * 1.5) / Math.min(TAN_V, tanH));
+    let distance = Math.max(base, (radius * 1.5) / Math.min(tanV, tanH));
     const v = new THREE.Vector3();
 
     for (let pass = 0; pass < 10; pass++) {
@@ -199,7 +189,7 @@ export class Stage {
         v.subVectors(p, eye);
         const depth = Math.max(v.dot(dir), 0.1);
         const nx = v.dot(right) / (depth * tanH);
-        const ny = v.dot(up) / (depth * TAN_V);
+        const ny = v.dot(up) / (depth * tanV);
         minX = Math.min(minX, nx);
         maxX = Math.max(maxX, nx);
         minY = Math.min(minY, ny);
@@ -207,25 +197,31 @@ export class Stage {
       }
       // Scale distance so the content fills the band, then slide to centre it there.
       const fill = Math.max((maxX - minX) / (2 - 2 * pad), (maxY - minY) / ((top - bottom) * (1 - pad)));
-      distance = Math.max(distance * fill, BASE_DISTANCE / MAX_ZOOM);
+      distance = Math.max(distance * fill, base / MAX_ZOOM);
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2 - (top + bottom) / 2;
       target.addScaledVector(right, cx * tanH * distance);
-      target.addScaledVector(forward, (cy * TAN_V * distance) / Math.max(cos, 0.2));
+      target.addScaledVector(forward, (cy * tanV * distance) / Math.max(cos, 0.2));
     }
-    return { x: target.x, y: target.y, zoom: BASE_DISTANCE / distance };
+    return { x: target.x, y: target.y, zoom: base / distance };
   }
 
   private get distance() {
-    return BASE_DISTANCE / this.view.zoom;
+    return baseDistance(this.view.fov) / this.view.zoom;
   }
 
   private applyView() {
-    const { x, y, tilt, turn } = this.view;
+    const { x, y, tilt, turn, fov } = this.view;
     const camera = this.camera;
+    const distance = this.distance;
+    camera.fov = fov;
+    // Keep depth precision proportional: a narrow field of view puts the camera far away.
+    camera.near = distance * 0.1;
+    camera.far = distance * 3 + 200;
+    camera.updateProjectionMatrix();
     camera.rotation.set(THREE.MathUtils.degToRad(tilt), 0, THREE.MathUtils.degToRad(turn), 'ZXY');
     this.forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
-    camera.position.set(x, y, 0).addScaledVector(this.forward, -this.distance);
+    camera.position.set(x, y, 0).addScaledVector(this.forward, -distance);
     camera.updateMatrixWorld();
   }
 

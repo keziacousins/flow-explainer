@@ -279,6 +279,7 @@ d.scene({
   highlight: [router],
   reveal: 'onUse',
   play: [{ flow: 'hotel-search', pause: 1.5 }],
+  callouts: [{ at: router, text: 'waits for all three' }],
 });
 
 d.scene({
@@ -298,6 +299,7 @@ d.scene({
   groups: ['api', 'reads'],
   highlight: [index],
   focus: [index, subgraphs.get('search'), router, shoppers],
+  callouts: [{ at: index, text: 'read by every search' }],
   streams: [
     { from: shoppers, to: router, rate: 3, jitter: 0.6 },
     { from: router, to: subgraphs.get('search'), rate: 3, jitter: 0.6 },
@@ -340,6 +342,7 @@ d.scene({
   tilt: 60,
   turn: -40,
   fog: 0.3,
+  projection: 'parallel',
   streams: ambient.map((s) => ({ ...s, rate: s.rate * 0.5 })),
   play: [
     { flow: 'refresh', pause: 3 },

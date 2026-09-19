@@ -4,10 +4,11 @@ import type { EdgeView } from './edge';
 import type { Graph } from './graph';
 import type { GroupView } from './group';
 import type { SceneModel } from './model';
-import type { NodeView } from './node';
+import type { Callout, Callouts } from './callouts';
+import { THICKNESS, type NodeView } from './node';
 import { reducedMotion } from './palette';
 import type { RuntimeLayer } from './runtime';
-import type { Stage } from './stage';
+import { PARALLEL_FOV, PERSPECTIVE_FOV, type Stage } from './stage';
 import type { Traffic } from './traffic';
 
 /** Default camera angles when a scene shows the runtime layer: from above, off to one side. */
@@ -43,6 +44,7 @@ export class Director {
     private groups: Map<string, GroupView>,
     private runtime: RuntimeLayer,
     private traffic: Traffic,
+    private callouts: Callouts,
   ) {
     stage.onResize(() => {
       if (this.index < 0 || this.cameraFree) return;
@@ -153,6 +155,8 @@ export class Director {
     if (first) Object.assign(this.stage.view, view);
     else tl.to(this.stage.view, { ...view, duration: 1.6, ease: 'power3.inOut' }, 0);
 
+    this.callouts.set(this.calloutsFor(scene, focusNodes));
+
     if (reducedMotion) tl.timeScale(3);
 
     for (const fn of this.listeners) fn({ index, scene, forward, accent: this.accentOf(scene) });
@@ -174,6 +178,45 @@ export class Director {
     return node ? `#${node.accent.getHexString()}` : null;
   }
 
+  /**
+   * Callouts for a scene: tower sizes for what the scene is about, plus any the scene
+   * asks for. Each fades with whatever it points at.
+   */
+  private calloutsFor(scene: SceneModel, focus: Set<string> | null): Callout[] {
+    const out: Callout[] = [];
+    const towers = [...this.graph.nodeIds(scene.runtime)]
+      .map((id) => ({ id, cluster: this.runtime.clusters.get(id) }))
+      .filter((t) => t.cluster && t.cluster.count > 1);
+    // Label the towers the scene singles out; with nothing singled out, just the biggest few.
+    const about = new Set([...this.graph.nodeIds(scene.highlight), ...(focus ?? [])]);
+    const chosen = about.size
+      ? towers.filter((t) => about.has(t.id))
+      : towers.sort((a, b) => b.cluster!.count - a.cluster!.count).slice(0, 3);
+    for (const { cluster } of chosen) {
+      if (!cluster) continue;
+      out.push({
+        text: `${cluster.count} ${cluster.kind}`,
+        accent: `#${cluster.node.accent.getHexString()}`,
+        anchor: cluster.anchor,
+        owner: cluster.node.model.id,
+        opacity: () => cluster.state.appear * (1 - cluster.state.dim),
+      });
+    }
+    for (const c of scene.callouts ?? []) {
+      const node = this.nodes.get(c.at)!;
+      const cluster = this.runtime.clusters.get(c.at);
+      const [x, y] = node.model.pos;
+      out.push({
+        text: c.text,
+        accent: `#${node.accent.getHexString()}`,
+        anchor: c.underneath && cluster ? cluster.anchor : new THREE.Vector3(x, y - node.model.size[1] / 2, THICKNESS),
+        owner: c.at,
+        opacity: () => (c.underneath && cluster ? cluster.state.appear : node.state.appear),
+      });
+    }
+    return out;
+  }
+
   /** The view for a scene: its angles, and the position and zoom that fit its nodes. */
   private framing(scene: SceneModel) {
     const underneath = this.graph.nodeIds(scene.runtime);
@@ -189,7 +232,8 @@ export class Director {
       const cluster = this.runtime.clusters.get(id);
       if (cluster && underneath.has(id)) points.push(...cluster.corners);
     }
-    return { ...this.stage.framing(points, tilt, turn), tilt, turn };
+    const fov = scene.projection === 'parallel' ? PARALLEL_FOV : PERSPECTIVE_FOV;
+    return { ...this.stage.framing(points, tilt, turn, fov), tilt, turn, fov };
   }
 }
 

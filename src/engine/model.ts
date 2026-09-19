@@ -119,6 +119,14 @@ export interface PlayModel {
   once?: boolean;
 }
 
+export interface CalloutModel {
+  /** Node the callout points at. */
+  at: string;
+  text: string;
+  /** Point at the node's runtime tower rather than the node itself. */
+  underneath?: boolean;
+}
+
 export interface SceneModel {
   title: string;
   /** Caption text. Wrap identifiers in backticks to set them as code. */
@@ -145,6 +153,10 @@ export interface SceneModel {
   turn?: number;
   /** How much the sheet the diagram sits on hides the towers beneath it, 0 to 1. */
   fog?: number;
+  /** `parallel` removes perspective, like an axonometric drawing. Defaults to `perspective`. */
+  projection?: 'perspective' | 'parallel';
+  /** Labels set off to the side with leader lines, for what the scene is about. */
+  callouts?: CalloutModel[];
 }
 
 export interface Model {

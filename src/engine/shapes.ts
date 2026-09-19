@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { NodeModel, Shape } from './model';
 
-/** Offset between the stacked cards drawn behind nodes with runtime multiplicity. */
+/** Offset between the stacked cards drawn behind nodes with runtime multiplicity (flat view). */
 export const STACK_OFFSET = 0.13;
 export const STACK_LAYERS = 2;
 
@@ -10,34 +10,43 @@ export function stackDepth(node: NodeModel) {
   return node.runtime && node.runtime.count > 1 ? STACK_OFFSET * STACK_LAYERS : 0;
 }
 
-export interface ShapeGeometry {
-  /** Filled area. */
-  fill: THREE.Shape;
+export interface Footprint {
+  /** The shape seen from above. Solids are this, extruded. */
+  shape: THREE.Shape;
   /** Outline as one continuous path, evenly spaced so it traces in at a steady speed. */
   outline: THREE.Vector2[];
   /** Corner radius for the rounded-rectangle glow approximation. */
   glowRadius: number;
+  /** Whether labels sit centred (round shapes) or left-aligned (boxes). */
+  centred: boolean;
 }
 
 const OUTLINE_POINTS = 160;
 const BOX_RADIUS = 0.2;
 
-export function shapeGeometry(shape: Shape, w: number, h: number): ShapeGeometry {
+/**
+ * Every shape is a footprint: the flat view shows it from above, the 3D view shows it
+ * extruded, and runtime instances are thinner copies of it stacked beneath. So a
+ * database is an elliptical puck, and its shards a stack of discs.
+ */
+export function footprint(shape: Shape, w: number, h: number): Footprint {
   switch (shape) {
-    case 'db':
-      return cylinder(w, h);
+    case 'db': {
+      const s = new THREE.Shape().absellipse(0, 0, w / 2, h / 2, 0, Math.PI * 2, false);
+      return { shape: s, outline: s.getSpacedPoints(OUTLINE_POINTS), glowRadius: h / 2, centred: true };
+    }
     case 'queue': {
       const s = roundedRect(w, h, h / 2);
-      return { fill: s, outline: s.getSpacedPoints(OUTLINE_POINTS), glowRadius: h / 2 };
+      return { shape: s, outline: s.getSpacedPoints(OUTLINE_POINTS), glowRadius: h / 2, centred: false };
     }
     case 'actor': {
       const r = Math.min(w, h) / 2;
       const s = new THREE.Shape().absarc(0, 0, r, Math.PI / 2, Math.PI / 2 + Math.PI * 2, false);
-      return { fill: s, outline: s.getSpacedPoints(OUTLINE_POINTS), glowRadius: r };
+      return { shape: s, outline: s.getSpacedPoints(OUTLINE_POINTS), glowRadius: r, centred: true };
     }
     default: {
       const s = roundedRect(w, h, BOX_RADIUS);
-      return { fill: s, outline: s.getSpacedPoints(OUTLINE_POINTS), glowRadius: BOX_RADIUS };
+      return { shape: s, outline: s.getSpacedPoints(OUTLINE_POINTS), glowRadius: BOX_RADIUS, centred: false };
     }
   }
 }
@@ -58,27 +67,87 @@ function roundedRect(w: number, h: number, r: number) {
   return s;
 }
 
-/** A database cylinder seen side-on: elliptical top, straight sides, rounded base. */
-function cylinder(w: number, h: number): ShapeGeometry {
-  const rx = w / 2;
-  const ry = Math.min(0.22, h * 0.16);
-  const top = h / 2 - ry;
-  const bottom = -h / 2 + ry;
+/**
+ * Solid shading shared by nodes and runtime slabs: dark top faces, darker sides, and a
+ * bright rim wherever the surface turns (bevels and side walls), so edges glow in 3D.
+ * Per-instance colour and state (appear, heat, dim) come from attributes when instanced.
+ */
+export function solidMaterial(instanced: boolean) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uFill: { value: new THREE.Color('#0B1120') },
+      uLine: { value: new THREE.Color('#2E3D5C') },
+      uColor: { value: new THREE.Color() },
+      uState: { value: new THREE.Vector3(1, 0, 0) },
+      uOpacity: { value: 1 },
+    },
+    defines: instanced ? { INSTANCED: '' } : {},
+    vertexShader: /* glsl */ `
+      #ifdef INSTANCED
+        attribute vec3 aColor;
+        attribute vec3 aState;
+      #else
+        uniform vec3 uColor;
+        uniform vec3 uState;
+      #endif
+      varying vec3 vNormal;
+      varying vec3 vColor;
+      varying vec3 vState;
+      void main() {
+        vNormal = normal;
+        #ifdef INSTANCED
+          vColor = aColor;
+          vState = aState;
+          mat4 m = instanceMatrix;
+        #else
+          vColor = uColor;
+          vState = uState;
+          mat4 m = mat4(1.0);
+        #endif
+        gl_Position = projectionMatrix * modelViewMatrix * m * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uFill;
+      uniform vec3 uLine;
+      uniform float uOpacity;
+      varying vec3 vNormal;
+      varying vec3 vColor;
+      varying vec3 vState;
+      void main() {
+        float appear = vState.x;
+        float heat = vState.y;
+        float dim = vState.z;
+        if (appear < 0.01) discard;
+        float up = abs(normalize(vNormal).z);
+        // Bevels face partly up: that band is the rim.
+        float rim = smoothstep(0.2, 0.5, up) * (1.0 - smoothstep(0.85, 0.97, up));
+        float side = 1.0 - smoothstep(0.1, 0.3, up);
+        float brightness = 1.0 - 0.7 * dim;
 
-  const fill = new THREE.Shape();
-  fill.moveTo(-rx, top);
-  fill.lineTo(-rx, bottom);
-  fill.absellipse(0, bottom, rx, ry, Math.PI, Math.PI * 2, false);
-  fill.lineTo(rx, top);
-  fill.absellipse(0, top, rx, ry, 0, Math.PI, false);
+        vec3 line = mix(mix(uLine, vColor, 0.5), vColor * 3.0, heat) * brightness;
+        vec3 top = mix(uFill, vColor * 0.3, 0.12 + heat * 0.4) * brightness;
+        vec3 wall = mix(uFill * 1.4, vColor * 0.25, 0.35 + heat * 0.4) * brightness * 0.8;
+        vec3 color = mix(mix(top, wall, side), line, rim);
+        gl_FragColor = vec4(color, uOpacity * min(1.0, appear * 1.5));
+      }
+    `,
+    transparent: true,
+  });
+}
 
-  // Top ellipse all the way round, down the left, across the front of the base, up the right.
-  const outline = new THREE.Path();
-  outline.moveTo(-rx, top);
-  outline.absellipse(0, top, rx, ry, Math.PI, Math.PI * 3, false);
-  outline.lineTo(-rx, bottom);
-  outline.absellipse(0, bottom, rx, ry, Math.PI, Math.PI * 2, false);
-  outline.lineTo(rx, top);
-
-  return { fill, outline: outline.getSpacedPoints(OUTLINE_POINTS), glowRadius: 0.3 };
+/** An extruded footprint with a small bevel for the rim to catch. Top face at z = 0. */
+export function solidGeometry(shape: THREE.Shape, thickness: number, bevel = 0.025) {
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: thickness - bevel * 2,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelOffset: -bevel,
+    bevelSegments: 1,
+    curveSegments: 24,
+  });
+  // Extrusion runs from z = 0 upward; put the top face at z = 0 and hang the solid below it.
+  geometry.translate(0, 0, -(thickness - bevel));
+  return geometry;
 }

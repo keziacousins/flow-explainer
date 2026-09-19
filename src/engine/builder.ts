@@ -65,8 +65,11 @@ const DEFAULT_SIZE: Record<Shape, [number, number]> = {
  */
 function labelWidth(label: string, shape: Shape, runtime?: Runtime) {
   if (shape === 'actor') return 0;
+  const text = label.length * 0.145;
+  // Text sits centred inside an ellipse, where there's less usable width than in a box.
+  if (shape === 'db') return text / 0.72 + 0.3;
   const padding = shape === 'queue' ? 1 : 0.6;
-  return label.length * 0.145 + padding + (runtime && runtime.count > 1 ? 0.45 : 0);
+  return text + padding + (runtime && runtime.count > 1 ? 0.45 : 0);
 }
 
 /** A node set: several nodes described together. Its id selects all members. */

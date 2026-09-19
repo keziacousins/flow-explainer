@@ -14,9 +14,12 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "gsap": "^3.15.0",
     "postprocessing": "^6.39.5",
-    "three": "^0.186.0"
+    "three": "^0.186.0",
+    "troika-three-text": "^0.52.5"
   },
   "devDependencies": {
     "@types/three": "^0.186.0",

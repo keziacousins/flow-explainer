@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Checkout platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <main id="app">
+      <div id="stage"></div>
+      <div id="labels" aria-hidden="true"></div>
+      <div class="vignette" aria-hidden="true"></div>
+
+      <header class="deck-title">
+        <p class="deck-name"></p>
+        <p class="deck-sub"></p>
+      </header>
+
+      <section id="caption" aria-live="polite">
+        <p class="step"></p>
+        <h1 class="title"></h1>
+        <p class="body"></p>
+      </section>
+
+      <nav id="nav" aria-label="Scenes">
+        <p class="hint">Use ← → or click to step through</p>
+        <button class="reset" type="button" hidden>Reset view</button>
+        <button class="prev" type="button" aria-label="Previous scene">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>
+        </button>
+        <ol class="dots"></ol>
+        <button class="next" type="button" aria-label="Next scene">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+        </button>
+      </nav>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

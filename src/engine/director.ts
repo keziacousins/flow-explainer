@@ -1,14 +1,17 @@
 import * as THREE from 'three';
 import { gsap } from 'gsap';
 import type { EdgeView } from './edge';
+import type { Graph } from './graph';
+import type { GroupView } from './group';
+import type { SceneModel } from './model';
 import type { NodeView } from './node';
 import { reducedMotion } from './palette';
 import type { Stage } from './stage';
-import type { SceneSpec, Selector } from './types';
+import type { Traffic } from './traffic';
 
 export interface SceneChange {
   index: number;
-  scene: SceneSpec;
+  scene: SceneModel;
   forward: boolean;
   /** Colour of the first highlighted node or edge, for tying the caption to the diagram. */
   accent: string | null;
@@ -27,9 +30,11 @@ export class Director {
 
   constructor(
     private stage: Stage,
+    private graph: Graph,
     private nodes: Map<string, NodeView>,
     private edges: Map<string, EdgeView>,
-    readonly scenes: SceneSpec[],
+    private groups: Map<string, GroupView>,
+    private traffic: Traffic,
   ) {
     stage.onResize(() => {
       if (this.index < 0 || this.cameraFree) return;
@@ -37,6 +42,10 @@ export class Director {
       this.stage.camera.position.set(frame.x, frame.y, this.stage.camera.position.z);
       this.stage.camera.zoom = frame.zoom;
     });
+  }
+
+  get scenes() {
+    return this.graph.model.scenes;
   }
 
   onChange(fn: (change: SceneChange) => void) {
@@ -59,51 +68,65 @@ export class Director {
     this.index = index;
     this.cameraFree = false;
     const scene = this.scenes[index];
+    const graph = this.graph;
 
-    const nodeIds = [...this.nodes.keys()];
-    const allIds = [...nodeIds, ...this.edges.keys()];
-    const shown = resolve(scene.show, nodeIds);
-    const flows = resolve(scene.flow, [...this.edges.keys()]);
-    const hot = resolve(scene.highlight, allIds);
-    const focus = scene.focus ? resolve(scene.focus, allIds) : null;
+    const shown = graph.nodeIds(scene.show);
+    const hotNodes = graph.nodeIds(scene.highlight);
+    const hotEdges = graph.edgeIds(scene.highlight);
+    const focusNodes = scene.focus ? graph.nodeIds(scene.focus) : null;
+    const focusEdges = scene.focus ? graph.edgeIds(scene.focus) : null;
+    const shownGroups = new Set(parts(scene.groups));
+    const onUse = scene.reveal === 'onUse';
+
+    // New things build in left to right, following the usual direction of flow.
+    const nodes = [...this.nodes.values()].sort((a, b) => a.model.pos[0] - b.model.pos[0]);
+    const entering = nodes.filter((n) => shown.has(n.model.id) && n.state.appear < 1);
+    const nodeStagger = Math.min(0.14, 1.2 / Math.max(entering.length, 1));
+    const edgeStart = 0.7 + nodeStagger * Math.max(entering.length - 1, 0);
+
+    this.traffic.setScene(scene, edgeStart + (onUse ? 0.2 : 0.5));
 
     this.timeline?.kill();
     const tl = gsap.timeline();
     this.timeline = tl;
 
-    // New things build in left to right, following the direction of flow.
-    const nodes = [...this.nodes.values()].sort((a, b) => a.spec.pos[0] - b.spec.pos[0]);
-    let entering = 0;
     for (const node of nodes) {
-      const id = node.spec.id;
+      const id = node.model.id;
       const on = shown.has(id);
-      if (on && node.state.appear < 1) {
-        tl.to(node.state, { appear: 1, duration: 0.9, ease: 'power2.inOut' }, 0.3 + 0.14 * entering++);
-      } else if (!on && node.state.appear > 0) {
-        tl.to(node.state, { appear: 0, duration: 0.4, ease: 'power1.in' }, 0);
-      }
+      const k = entering.indexOf(node);
+      if (k >= 0) tl.to(node.state, { appear: 1, duration: 0.9, ease: 'power2.inOut' }, 0.3 + nodeStagger * k);
+      else if (!on && node.state.appear > 0) tl.to(node.state, { appear: 0, duration: 0.4, ease: 'power1.in' }, 0);
       tl.to(
         node.state,
-        { glow: hot.has(id) ? 1 : 0, dim: focus && !focus.has(id) ? 1 : 0, duration: 0.8, ease: 'power2.inOut' },
+        { glow: hotNodes.has(id) ? 1 : 0, dim: focusNodes && !focusNodes.has(id) ? 1 : 0, duration: 0.8 },
         0.4,
       );
     }
 
-    const edges = [...this.edges.values()].sort((a, b) => a.from.spec.pos[0] - b.from.spec.pos[0]);
-    const edgeStart = 0.7 + 0.14 * Math.max(entering - 1, 0);
-    entering = 0;
+    const edges = [...this.edges.values()].sort((a, b) => a.from.model.pos[0] - b.from.model.pos[0]);
+    const drawing = edges.filter(
+      (e) => !onUse && shown.has(e.model.from) && shown.has(e.model.to) && e.state.appear < 1,
+    );
+    const edgeStagger = Math.min(0.12, 1 / Math.max(drawing.length, 1));
     for (const edge of edges) {
-      const { from, to } = edge.spec;
+      const { from, to } = edge.model;
       const on = shown.has(from) && shown.has(to);
-      if (on && edge.state.appear < 1) {
-        tl.to(edge.state, { appear: 1, duration: 0.8, ease: 'power2.inOut' }, edgeStart + 0.12 * entering++);
-      } else if (!on && edge.state.appear > 0) {
-        tl.to(edge.state, { appear: 0, flow: 0, duration: 0.35, ease: 'power1.in' }, 0);
+      const k = drawing.indexOf(edge);
+      if (k >= 0) {
+        tl.to(edge.state, { appear: 1, duration: 0.8, ease: 'power2.inOut' }, edgeStart + edgeStagger * k);
+      } else if ((!on || onUse) && edge.state.appear > 0) {
+        // In `onUse` scenes, edges are cleared so the scene's traffic can draw them afresh.
+        tl.to(edge.state, { appear: 0, duration: 0.35, ease: 'power1.in' }, 0);
       }
-      const focused = !focus || focus.has(edge.id) || (focus.has(from) && focus.has(to));
-      const flowing = on && flows.has(edge.id);
-      tl.to(edge.state, { glow: hot.has(edge.id) ? 1 : 0, dim: focused ? 0 : 1, duration: 0.8 }, 0.4);
-      tl.to(edge.state, { flow: flowing ? 1 : 0, duration: 0.6 }, flowing ? edgeStart + 0.5 : 0);
+      const focused =
+        !focusNodes || focusEdges!.has(edge.id) || (focusNodes.has(from) && focusNodes.has(to));
+      tl.to(edge.state, { glow: hotEdges.has(edge.id) ? 1 : 0, dim: focused ? 0 : 1, duration: 0.8 }, 0.4);
+    }
+
+    for (const group of this.groups.values()) {
+      const on = shownGroups.has(group.model.id) || scene.groups === '*';
+      const focused = !focusNodes || group.model.members.some((m) => focusNodes.has(m));
+      tl.to(group.state, { appear: on ? 1 : 0, dim: focused ? 0 : 1, duration: on ? 0.8 : 0.4 }, on ? 0.2 : 0);
     }
 
     const frame = this.framing(scene);
@@ -118,11 +141,7 @@ export class Director {
 
     if (reducedMotion) tl.timeScale(3);
 
-    const firstHot = scene.highlight === '*' ? null : scene.highlight?.[0];
-    const accent = firstHot
-      ? `#${(this.nodes.get(firstHot)?.accent ?? this.edges.get(firstHot)?.from.accent)?.getHexString()}`
-      : null;
-    for (const fn of this.listeners) fn({ index, scene, forward, accent });
+    for (const fn of this.listeners) fn({ index, scene, forward, accent: this.accentOf(scene) });
   }
 
   /** Animate the camera back to the current scene's framing. */
@@ -136,10 +155,17 @@ export class Director {
     gsap.to(camera, { zoom: frame.zoom, duration, ease: 'power3.inOut' });
   }
 
-  private framing(scene: SceneSpec) {
-    const ids = resolve(scene.camera ?? scene.show, [...this.nodes.keys()]);
+  private accentOf(scene: SceneModel) {
+    const first = parts(scene.highlight)[0];
+    if (!first || first === '*') return null;
+    const edge = first.includes('->') ? [...this.graph.edgeIds(first)][0] : undefined;
+    const node = edge ? this.edges.get(edge)?.from : this.nodes.get([...this.graph.nodeIds(first)][0]);
+    return node ? `#${node.accent.getHexString()}` : null;
+  }
+
+  private framing(scene: SceneModel) {
     const box = new THREE.Box2();
-    for (const id of ids) {
+    for (const id of this.graph.nodeIds(scene.camera ?? scene.show)) {
       const node = this.nodes.get(id);
       if (node) box.union(node.bounds);
     }
@@ -147,7 +173,7 @@ export class Director {
   }
 }
 
-function resolve(selector: Selector | undefined, all: string[]) {
-  if (selector === '*') return new Set(all);
-  return new Set(selector ?? []);
+function parts(selector: string | string[] | undefined): string[] {
+  if (selector === undefined) return [];
+  return typeof selector === 'string' ? [selector] : selector;
 }

@@ -1,14 +1,16 @@
-import type { Role } from './types';
+import type { Role } from './model';
 
 export const palette = {
   bg: '#070B14',
   grid: '#1A2438',
   line: '#2E3D5C',
   fill: '#0B1120',
+  error: '#FF4D6A',
 };
 
 export const roleColor: Record<Role, string> = {
   client: '#4FD1FF',
+  external: '#8C9BB8',
   edge: '#A084FF',
   service: '#6E9BFF',
   data: '#5EF0B5',

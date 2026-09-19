@@ -22,6 +22,8 @@ export class Stage {
   height = 0;
   /** Fraction of the viewport height at the bottom that the caption covers. */
   captionReserve = 0.3;
+  /** Fraction of the viewport height at the top kept clear for the deck title. */
+  titleReserve = 0.1;
 
   private composer: EffectComposer;
   private tickers: Ticker[] = [];
@@ -94,14 +96,16 @@ export class Stage {
     const size = box.getSize(new THREE.Vector2()).addScalar(pad * 2);
     const centre = box.getCenter(new THREE.Vector2());
     const aspect = this.width / this.height;
-    const reserve = this.captionReserve;
+    const below = this.captionReserve;
+    const above = this.titleReserve;
     const zoom = Math.min(
       (VIEW_HEIGHT * aspect) / size.x,
-      (VIEW_HEIGHT * (1 - reserve)) / size.y,
+      (VIEW_HEIGHT * (1 - below - above)) / size.y,
       1.7,
     );
+    // Centre the content in the band between the title and the caption.
     const visibleHeight = VIEW_HEIGHT / zoom;
-    return { x: centre.x, y: centre.y - (visibleHeight * reserve) / 2, zoom };
+    return { x: centre.x, y: centre.y - (visibleHeight * (below - above)) / 2, zoom };
   }
 
   private resize() {

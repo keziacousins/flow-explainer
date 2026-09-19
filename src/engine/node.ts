@@ -2,13 +2,15 @@ import * as THREE from 'three';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import type { NodeModel } from './model';
 import { palette, reducedMotion, roleColor } from './palette';
+import { shapeGeometry, STACK_LAYERS, STACK_OFFSET, stackDepth } from './shapes';
 import type { Stage } from './stage';
-import type { NodeSpec } from './types';
 
-const DEFAULT_SIZE: [number, number] = [3.2, 1.5];
-const RADIUS = 0.2;
-const BORDER_SEGMENTS = 160;
+const HALO_MARGIN = 0.6;
+/** Labels smaller than this many pixels are hidden rather than drawn illegibly. */
+const MIN_LABEL_PX = 6;
+const LABEL_EM = 0.3;
 
 /** Tweenable state. Scenes animate these; `update` turns them into visuals. */
 export interface NodeState {
@@ -21,112 +23,179 @@ export class NodeView {
   readonly state: NodeState = { appear: 0, glow: 0, dim: 0 };
   readonly group = new THREE.Group();
   readonly accent: THREE.Color;
-  readonly width: number;
-  readonly height: number;
+
+  /** Brief flash when a packet arrives. Decays on its own. */
+  private pulse = 0;
+  /** Brief red flash when a packet is dropped here. */
+  private alarm = 0;
 
   private fillMaterial: THREE.MeshBasicMaterial;
-  private borderGeometry: LineGeometry;
+  private outline: LineGeometry[] = [];
   private borderMaterial: LineMaterial;
+  private stack: { fill: THREE.MeshBasicMaterial; border: LineMaterial }[] = [];
   private haloMaterial: THREE.ShaderMaterial;
   private label: HTMLElement;
+  private segments: number;
   private rest: THREE.Color;
   private hot: THREE.Color;
+  private errorHot = new THREE.Color(palette.error).multiplyScalar(3);
   private fillRest = new THREE.Color(palette.fill);
   private fillHot: THREE.Color;
 
   constructor(
-    readonly spec: NodeSpec,
+    readonly model: NodeModel,
     labelLayer: HTMLElement,
   ) {
-    [this.width, this.height] = spec.size ?? DEFAULT_SIZE;
-    this.accent = new THREE.Color(roleColor[spec.role]);
+    const [w, h] = model.size;
+    this.accent = new THREE.Color(roleColor[model.role]);
     this.rest = new THREE.Color(palette.line).lerp(this.accent, 0.35);
     this.hot = this.accent.clone().multiplyScalar(3);
     this.fillHot = this.fillRest.clone().lerp(this.accent, 0.05);
 
-    const shape = roundedRect(this.width, this.height, RADIUS);
+    const shape = shapeGeometry(model.shape, w, h);
+    const fillGeometry = new THREE.ShapeGeometry(shape.fill, 12);
+    const outlinePositions = shape.outline.flatMap((p) => [p.x, p.y, 0]);
+    this.segments = shape.outline.length - 1;
+    const dashed = model.role === 'external';
 
-    this.fillMaterial = new THREE.MeshBasicMaterial({
-      color: palette.fill,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const fill = new THREE.Mesh(new THREE.ShapeGeometry(shape, 6), this.fillMaterial);
-    fill.renderOrder = 3;
+    const makeBorder = (material: LineMaterial) => {
+      const geometry = new LineGeometry();
+      geometry.setPositions(outlinePositions);
+      this.outline.push(geometry);
+      const line = new Line2(geometry, material);
+      if (dashed) line.computeLineDistances();
+      return line;
+    };
+    const lineMaterial = (linewidth: number) =>
+      new LineMaterial({
+        linewidth,
+        transparent: true,
+        dashed,
+        dashSize: 0.14,
+        gapSize: 0.1,
+        depthTest: false,
+        depthWrite: false,
+      });
+    const fillMaterial = () =>
+      new THREE.MeshBasicMaterial({ color: palette.fill, transparent: true, depthTest: false, depthWrite: false });
 
-    // Evenly spaced points so the border traces in at a constant speed.
-    const points = shape.getSpacedPoints(BORDER_SEGMENTS);
-    this.borderGeometry = new LineGeometry();
-    this.borderGeometry.setPositions(points.flatMap((p) => [p.x, p.y, 0]));
-    this.borderMaterial = new LineMaterial({
-      linewidth: 1.5,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const border = new Line2(this.borderGeometry, this.borderMaterial);
+    // Cards stacked behind the node hint at its runtime multiplicity.
+    const layers = stackDepth(model) ? STACK_LAYERS : 0;
+    for (let k = layers; k >= 1; k--) {
+      const layer = { fill: fillMaterial(), border: lineMaterial(1.2) };
+      const fill = new THREE.Mesh(fillGeometry, layer.fill);
+      const border = makeBorder(layer.border);
+      fill.position.set(k * STACK_OFFSET, k * STACK_OFFSET, 0);
+      border.position.copy(fill.position);
+      fill.renderOrder = 3;
+      border.renderOrder = 3.1;
+      this.group.add(fill, border);
+      this.stack.push(layer);
+    }
+
+    this.fillMaterial = fillMaterial();
+    const fill = new THREE.Mesh(fillGeometry, this.fillMaterial);
+    fill.renderOrder = 3.4;
+    this.borderMaterial = lineMaterial(1.5);
+    const border = makeBorder(this.borderMaterial);
     border.renderOrder = 4;
 
-    const margin = 0.6;
-    this.haloMaterial = haloMaterial(this.width, this.height, RADIUS, margin, this.accent);
-    const halo = new THREE.Mesh(new THREE.PlaneGeometry(this.width + margin * 2, this.height + margin * 2), this.haloMaterial);
+    this.haloMaterial = haloMaterial(w, h, shape.glowRadius, HALO_MARGIN);
+    const halo = new THREE.Mesh(
+      new THREE.PlaneGeometry(w + HALO_MARGIN * 2, h + HALO_MARGIN * 2),
+      this.haloMaterial,
+    );
     halo.renderOrder = 2;
 
     this.group.add(halo, fill, border);
-    this.group.position.set(spec.pos[0], spec.pos[1], 0);
+    this.group.position.set(model.pos[0], model.pos[1], 0);
 
     this.label = document.createElement('div');
-    this.label.className = 'node-label';
-    this.label.style.setProperty('--w', String(this.width));
-    this.label.style.setProperty('--h', String(this.height));
+    this.label.className = `node-label shape-${model.shape}`;
+    this.label.style.setProperty('--w', String(w));
+    this.label.style.setProperty('--h', String(h));
     this.label.innerHTML = `<span class="name"></span><span class="detail"></span>`;
-    this.label.querySelector('.name')!.textContent = spec.label;
-    this.label.querySelector('.detail')!.textContent = spec.detail ?? '';
+    this.label.querySelector('.name')!.textContent = model.label;
+    this.label.querySelector('.detail')!.textContent = model.detail ?? '';
+    if (model.runtime && model.runtime.count > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = `×${model.runtime.count}`;
+      badge.title = `${model.runtime.count} ${model.runtime.kind}`;
+      this.label.appendChild(badge);
+    }
     labelLayer.appendChild(this.label);
   }
 
   get bounds() {
-    const [x, y] = this.spec.pos;
-    const hw = this.width / 2;
-    const hh = this.height / 2;
-    return new THREE.Box2(new THREE.Vector2(x - hw, y - hh), new THREE.Vector2(x + hw, y + hh));
+    const [x, y] = this.model.pos;
+    const [w, h] = this.model.size;
+    const stack = this.stack.length * STACK_OFFSET;
+    return new THREE.Box2(new THREE.Vector2(x - w / 2, y - h / 2), new THREE.Vector2(x + w / 2 + stack, y + h / 2 + stack));
   }
 
-  update(time: number, stage: Stage) {
+  /** A packet arrived. */
+  flash() {
+    this.pulse = 1;
+  }
+
+  /** A packet was dropped here. */
+  fail() {
+    this.alarm = 1;
+  }
+
+  update(time: number, delta: number, stage: Stage) {
+    this.pulse *= Math.exp(-delta * 5);
+    this.alarm *= Math.exp(-delta * 2.2);
+
     const { appear, glow, dim } = this.state;
     const visible = appear > 0.001;
     this.group.visible = visible;
     this.label.style.visibility = visible ? 'visible' : 'hidden';
     if (!visible) return;
 
-    const pulse = reducedMotion ? glow : glow * (0.8 + 0.2 * Math.sin(time * 2.6));
+    const breathing = reducedMotion ? glow : glow * (0.8 + 0.2 * Math.sin(time * 2.6));
+    const heat = Math.min(1, Math.max(breathing, this.pulse * 0.9));
     const brightness = 1 - 0.7 * dim;
+    const alarm = this.alarm;
 
-    this.borderGeometry.instanceCount = Math.ceil(appear * BORDER_SEGMENTS);
-    this.borderMaterial.color.copy(this.rest).lerp(this.hot, pulse).multiplyScalar(brightness);
+    const drawn = Math.ceil(appear * this.segments);
+    for (const g of this.outline) g.instanceCount = drawn;
 
-    this.haloMaterial.uniforms.uStrength.value = pulse * brightness * appear;
-    this.haloMaterial.visible = pulse > 0.01;
+    this.borderMaterial.color
+      .copy(this.rest)
+      .lerp(this.hot, heat)
+      .lerp(this.errorHot, alarm)
+      .multiplyScalar(brightness);
+    for (const layer of this.stack) {
+      layer.border.color.copy(this.rest).multiplyScalar(0.55 * brightness);
+      layer.fill.opacity = smoothstep(0.2, 1, appear) * 0.94;
+    }
+
+    const halo = this.haloMaterial.uniforms;
+    halo.uColor.value.copy(this.accent).lerp(this.errorHot, alarm);
+    halo.uStrength.value = Math.max(heat, alarm) * brightness * appear;
+    this.haloMaterial.visible = halo.uStrength.value > 0.01;
 
     this.fillMaterial.opacity = smoothstep(0.2, 1, appear) * 0.94;
-    this.fillMaterial.color.copy(this.fillRest).lerp(this.fillHot, glow);
+    this.fillMaterial.color.copy(this.fillRest).lerp(this.fillHot, Math.max(glow, this.pulse));
 
-    const [sx, sy] = stage.toScreen(this.spec.pos[0], this.spec.pos[1]);
+    const [sx, sy] = stage.toScreen(this.model.pos[0], this.model.pos[1]);
+    const legible = stage.pixelsPerUnit * LABEL_EM >= MIN_LABEL_PX;
     this.label.style.transform = `translate3d(${sx}px, ${sy}px, 0) translate(-50%, -50%)`;
-    this.label.style.opacity = String(smoothstep(0.5, 1, appear) * (1 - 0.6 * dim));
-    this.label.classList.toggle('is-hot', glow > 0.5);
+    this.label.style.opacity = legible ? String(smoothstep(0.5, 1, appear) * (1 - 0.6 * dim)) : '0';
+    this.label.classList.toggle('is-hot', heat > 0.5);
   }
 }
 
 /** Soft glow hugging a rounded rectangle, from its signed distance field. */
-function haloMaterial(w: number, h: number, r: number, margin: number, color: THREE.Color) {
+function haloMaterial(w: number, h: number, r: number, margin: number) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uHalfSize: { value: new THREE.Vector2(w / 2, h / 2) },
       uRadius: { value: r },
       uMargin: { value: margin },
-      uColor: { value: color },
+      uColor: { value: new THREE.Color() },
       uStrength: { value: 0 },
     },
     vertexShader: /* glsl */ `
@@ -158,22 +227,6 @@ function haloMaterial(w: number, h: number, r: number, margin: number, color: TH
     depthTest: false,
     depthWrite: false,
   });
-}
-
-function roundedRect(w: number, h: number, r: number) {
-  const x = -w / 2;
-  const y = -h / 2;
-  const s = new THREE.Shape();
-  s.moveTo(x + r, y);
-  s.lineTo(x + w - r, y);
-  s.quadraticCurveTo(x + w, y, x + w, y + r);
-  s.lineTo(x + w, y + h - r);
-  s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  s.lineTo(x + r, y + h);
-  s.quadraticCurveTo(x, y + h, x, y + h - r);
-  s.lineTo(x, y + r);
-  s.quadraticCurveTo(x, y, x + r, y);
-  return s;
 }
 
 export function smoothstep(edge0: number, edge1: number, x: number) {

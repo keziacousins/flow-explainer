@@ -93,6 +93,65 @@ body {
   color: var(--muted);
 }
 
+.node-label .detail:empty {
+  display: none;
+}
+
+/* Runtime multiplicity, e.g. ×30 shards. */
+.node-label .badge {
+  position: absolute;
+  top: calc(var(--ppu) * 0.14px);
+  right: calc(var(--ppu) * 0.2px);
+  font-family: var(--mono);
+  font-size: calc(var(--ppu) * 0.19px);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Leave room for the cylinder's top ellipse. */
+.node-label.shape-db {
+  padding-top: calc(var(--ppu) * 0.2px);
+}
+
+.node-label.shape-db .badge {
+  top: calc(var(--ppu) * 0.42px);
+}
+
+.node-label.shape-queue {
+  padding: 0 calc(var(--ppu) * 0.5px);
+}
+
+/* Actors are small circles; their label sits underneath. */
+.node-label.shape-actor {
+  width: max-content;
+  height: auto;
+  padding: 0;
+  align-items: center;
+  text-align: center;
+  translate: 0 calc((var(--h) * 0.5 + 0.4) * var(--ppu) * 1px);
+}
+
+.edge-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: calc(var(--ppu) * 0.18px);
+  color: var(--muted);
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+
+.group-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: calc(var(--ppu) * 0.22px);
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+
 .deck-title {
   position: absolute;
   top: var(--edge);

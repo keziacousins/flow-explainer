@@ -2,145 +2,105 @@ import * as THREE from 'three';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import type { EdgeModel } from './model';
 import { smoothstep, type NodeView } from './node';
-import { palette, reducedMotion } from './palette';
-import type { EdgeSpec } from './types';
+import { palette } from './palette';
+import type { Stage } from './stage';
 
 const SEGMENTS = 96;
-const PACKETS = 4;
-const TRAIL = 12;
-/** Distance between trail dots, in world units. */
-const TRAIL_SPACING = 0.03;
-/** Packet speed in world units per second. */
-const SPEED = reducedMotion ? 0.8 : 2.4;
-const GAP = 0.1;
+/** Points in the lookup table packets sample from. */
+const SAMPLES = 128;
 
 export interface EdgeState {
   appear: number;
   glow: number;
   dim: number;
-  flow: number;
 }
 
 export class EdgeView {
   readonly id: string;
-  readonly state: EdgeState = { appear: 0, glow: 0, dim: 0, flow: 0 };
+  readonly state: EdgeState = { appear: 0, glow: 0, dim: 0 };
   readonly group = new THREE.Group();
+  readonly length: number;
 
-  private curve: THREE.CubicBezierCurve3;
-  private length: number;
   private geometry: LineGeometry;
   private material: LineMaterial;
-  private packets: THREE.InstancedMesh;
   private rest = new THREE.Color(palette.line);
   private hot: THREE.Color;
-  private accent: THREE.Color;
-  private offsets: number[];
-
-  private matrix = new THREE.Matrix4();
-  private point = new THREE.Vector3();
-  private scale = new THREE.Vector3();
-  private quaternion = new THREE.Quaternion();
-  private color = new THREE.Color();
+  /** Evenly spaced points along the curve, so packets don't do arc-length maths per frame. */
+  private table = new Float32Array((SAMPLES + 1) * 2);
+  private label?: HTMLElement;
+  private mid: THREE.Vector3;
 
   constructor(
-    readonly spec: EdgeSpec,
+    readonly model: EdgeModel,
+    curve: THREE.Curve<THREE.Vector3>,
     readonly from: NodeView,
     readonly to: NodeView,
+    labelLayer: HTMLElement,
   ) {
-    this.id = `${spec.from}->${spec.to}`;
-    this.accent = from.accent.clone();
-    this.hot = this.accent.clone().multiplyScalar(2.2);
+    this.id = model.id;
+    this.hot = from.accent.clone().multiplyScalar(2.2);
+    this.length = curve.getLength();
+    this.mid = curve.getPointAt(0.5);
 
-    this.curve = connect(from, to);
-    this.length = this.curve.getLength();
+    curve.getSpacedPoints(SAMPLES).forEach((p, i) => {
+      this.table[i * 2] = p.x;
+      this.table[i * 2 + 1] = p.y;
+    });
 
     this.geometry = new LineGeometry();
-    this.geometry.setPositions(this.curve.getSpacedPoints(SEGMENTS).flatMap((p) => [p.x, p.y, 0]));
+    this.geometry.setPositions(curve.getSpacedPoints(SEGMENTS).flatMap((p) => [p.x, p.y, 0]));
     this.material = new LineMaterial({
       linewidth: 1.5,
       transparent: true,
+      dashed: model.style === 'dashed',
+      dashSize: 0.16,
+      gapSize: 0.12,
       depthTest: false,
       depthWrite: false,
     });
     const line = new Line2(this.geometry, this.material);
+    if (model.style === 'dashed') line.computeLineDistances();
     line.renderOrder = 1;
+    this.group.add(line);
 
-    this.packets = new THREE.InstancedMesh(
-      new THREE.CircleGeometry(0.05, 12),
-      new THREE.MeshBasicMaterial({
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthTest: false,
-        depthWrite: false,
-      }),
-      PACKETS * TRAIL,
-    );
-    this.packets.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.packets.frustumCulled = false;
-    this.packets.renderOrder = 2;
-    for (let i = 0; i < PACKETS * TRAIL; i++) this.packets.setColorAt(i, this.color.setRGB(0, 0, 0));
-
-    // Slightly uneven spacing reads as traffic rather than a conveyor belt.
-    this.offsets = Array.from({ length: PACKETS }, (_, i) => (i + (Math.random() - 0.5) * 0.35) / PACKETS);
-
-    this.group.add(line, this.packets);
+    if (model.label) {
+      this.label = document.createElement('div');
+      this.label.className = 'edge-label';
+      this.label.textContent = model.label;
+      labelLayer.appendChild(this.label);
+    }
   }
 
-  update(time: number) {
-    const { appear, glow, dim, flow } = this.state;
+  /** How bright traffic on this edge should be, given dimming. */
+  get brightness() {
+    return 1 - 0.75 * this.state.dim;
+  }
+
+  /** Point at fraction `u` of the way along, written into `out` (x, y). */
+  sample(u: number, out: { x: number; y: number }) {
+    const f = Math.min(Math.max(u, 0), 1) * SAMPLES;
+    const i = Math.min(Math.floor(f), SAMPLES - 1);
+    const t = f - i;
+    const a = i * 2;
+    out.x = this.table[a] + (this.table[a + 2] - this.table[a]) * t;
+    out.y = this.table[a + 1] + (this.table[a + 3] - this.table[a + 1]) * t;
+  }
+
+  update(stage: Stage) {
+    const { appear, glow } = this.state;
     const visible = appear > 0.001;
     this.group.visible = visible;
-    if (!visible) return;
-
-    const brightness = 1 - 0.75 * dim;
     this.geometry.instanceCount = Math.ceil(appear * SEGMENTS);
-    this.material.color.copy(this.rest).lerp(this.hot, glow).multiplyScalar(brightness);
+    this.material.color.copy(this.rest).lerp(this.hot, glow).multiplyScalar(this.brightness);
 
-    const phase = (time * SPEED) / this.length;
-    const trailStep = TRAIL_SPACING / this.length;
-    for (let p = 0; p < PACKETS; p++) {
-      const head = (phase + this.offsets[p]) % 1;
-      for (let k = 0; k < TRAIL; k++) {
-        const i = p * TRAIL + k;
-        const u = head - k * trailStep;
-        const falloff = 1 - k / TRAIL;
-        // Fade in and out at the ends, and never run ahead of the drawn line.
-        const endFade = smoothstep(0, 0.08, u) * (1 - smoothstep(0.92, 1, u)) * (u <= appear ? 1 : 0);
-        const strength = flow * endFade * brightness;
-
-        this.curve.getPointAt(Math.min(Math.max(u, 0), 1), this.point);
-        this.point.z = 0;
-        const size = strength > 0 ? (k === 0 ? 1.1 : 0.85 * falloff) : 0;
-        this.matrix.compose(this.point, this.quaternion, this.scale.setScalar(size));
-        this.packets.setMatrixAt(i, this.matrix);
-        this.packets.setColorAt(i, this.color.copy(this.accent).multiplyScalar((k === 0 ? 5 : 1.6 * falloff) * strength));
-      }
+    if (this.label) {
+      this.label.style.visibility = visible ? 'visible' : 'hidden';
+      if (!visible) return;
+      const [sx, sy] = stage.toScreen(this.mid.x, this.mid.y);
+      this.label.style.transform = `translate3d(${sx}px, ${sy}px, 0) translate(-50%, -130%)`;
+      this.label.style.opacity = String(smoothstep(0.7, 1, appear) * this.brightness);
     }
-    this.packets.instanceMatrix.needsUpdate = true;
-    this.packets.instanceColor!.needsUpdate = true;
   }
-}
-
-/** An S-curve from the facing side of `a` to the facing side of `b`. */
-function connect(a: NodeView, b: NodeView) {
-  const [ax, ay] = a.spec.pos;
-  const [bx, by] = b.spec.pos;
-  const dx = bx - ax;
-  const dy = by - ay;
-  const horizontal = Math.abs(dx) > (a.width + b.width) / 4;
-
-  const v = (x: number, y: number) => new THREE.Vector3(x, y, 0);
-  if (horizontal) {
-    const s = Math.sign(dx);
-    const start = v(ax + s * (a.width / 2 + GAP), ay);
-    const end = v(bx - s * (b.width / 2 + GAP), by);
-    const k = Math.abs(end.x - start.x) * 0.5;
-    return new THREE.CubicBezierCurve3(start, v(start.x + s * k, start.y), v(end.x - s * k, end.y), end);
-  }
-  const s = Math.sign(dy);
-  const start = v(ax, ay + s * (a.height / 2 + GAP));
-  const end = v(bx, by - s * (b.height / 2 + GAP));
-  const k = Math.abs(end.y - start.y) * 0.5;
-  return new THREE.CubicBezierCurve3(start, v(start.x, start.y + s * k), v(end.x, end.y - s * k), end);
 }

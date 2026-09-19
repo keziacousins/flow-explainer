@@ -72,7 +72,14 @@ export function mountUI(director: Director) {
       .timeline()
       .to(lines, { opacity: 0, y: -shift, duration: 0.25, ease: 'power1.in', stagger: 0.03 })
       .add(write)
-      .fromTo(lines, { y: shift }, { opacity: 1, y: 0, duration: 0.6, ease: 'power3.out', stagger: 0.06 }, '+=0.15');
+      // fromTo applies its start value as soon as the timeline is built unless told not
+      // to, which snapped the outgoing text down before it faded.
+      .fromTo(
+        lines,
+        { y: shift },
+        { opacity: 1, y: 0, duration: 0.6, ease: 'power3.out', stagger: 0.06, immediateRender: false },
+        '+=0.15',
+      );
   });
 }
 

@@ -5,7 +5,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import type { Text } from 'troika-three-text';
 import type { NodeModel } from './model';
 import { palette, reducedMotion, roleColor } from './palette';
-import { footprint, solidGeometry, solidMaterial, STACK_LAYERS, STACK_OFFSET, stackDepth } from './shapes';
+import { cardCount, footprint, solidGeometry, solidMaterial, STACK_OFFSET } from './shapes';
 import type { Stage } from './stage';
 import { makeText } from './text';
 
@@ -31,6 +31,12 @@ export class NodeView {
   readonly accent: THREE.Color;
   /** How visible this node's runtime tower is, 0 to 1. Set by the runtime layer. */
   underneath = 0;
+  /** Picked by the inspector: shows a steady highlight. */
+  selected = false;
+  /** Under the pointer: a slight lift in brightness. */
+  hovered = false;
+  /** The solid, for picking. */
+  readonly body: THREE.Mesh;
 
   /** Brief flash when a packet arrives. Decays on its own. */
   private pulse = 0;
@@ -51,7 +57,6 @@ export class NodeView {
   private label = new THREE.Group();
   private name: Text;
   private detail?: Text;
-  private badge?: Text;
   private nameColor = new THREE.Color('#C9D3E6');
   private nameHot = new THREE.Color('#FFFFFF');
 
@@ -85,8 +90,7 @@ export class NodeView {
 
     // Flat view only: cards behind the node hint at runtime multiplicity. In 3D the real
     // tower hangs beneath instead.
-    const layers = stackDepth(model) ? STACK_LAYERS : 0;
-    for (let k = layers; k >= 1; k--) {
+    for (let k = cardCount(model); k >= 1; k--) {
       const card = { fill: solidFor(), border: lineMaterial(1.2) };
       const mesh = new THREE.Mesh(geometry, card.fill);
       const border = makeBorder(card.border);
@@ -102,6 +106,8 @@ export class NodeView {
     const body = new THREE.Mesh(geometry, this.solid);
     body.position.z = THICKNESS;
     body.renderOrder = 3.4;
+    body.userData.nodeId = model.id;
+    this.body = body;
     this.borderMaterial = lineMaterial(1.5);
     const border = makeBorder(this.borderMaterial);
     border.position.z = THICKNESS + 0.002;
@@ -129,18 +135,6 @@ export class NodeView {
     this.name = makeText({ text: model.label, size: NAME_SIZE, font: 'medium', anchorX, anchorY: 'bottom' });
     this.name.position.set(x, detailH, 0);
     this.label.add(this.name);
-    if (model.runtime && model.runtime.count > 1) {
-      this.badge = makeText({
-        text: `×${model.runtime.count}`,
-        size: 0.17,
-        font: 'mono',
-        color: '#7C8BA5',
-        anchorX: 'right',
-        anchorY: 'top',
-      });
-      this.badge.position.set(w / 2 - 0.2, h / 2 - 0.14, THICKNESS + 0.004);
-      this.group.add(this.badge);
-    }
     // Actors are small, so their label sits on the sheet beneath them rather than inside.
     const actor = model.shape === 'actor';
     this.label.position.set(0, actor ? -h / 2 - 0.2 - blockH : -blockH / 2, actor ? 0.004 : THICKNESS + 0.004);
@@ -174,7 +168,8 @@ export class NodeView {
     if (!visible) return;
 
     const breathing = reducedMotion ? glow : glow * (0.8 + 0.2 * Math.sin(time * 2.6));
-    const heat = Math.min(1, Math.max(breathing, this.pulse * 0.9));
+    const picked = this.selected ? 0.75 : this.hovered ? 0.35 : 0;
+    const heat = Math.min(1, Math.max(breathing, this.pulse * 0.9, picked));
     const brightness = 1 - 0.7 * dim;
     const alarm = this.alarm;
     const lean = smoothstep(12, 45, stage.view.tilt);
@@ -215,7 +210,6 @@ export class NodeView {
       this.detail.fillOpacity = textOpacity;
       this.detail.visible = stage.pixelsPerUnit * DETAIL_SIZE >= MIN_LABEL_PX;
     }
-    if (this.badge) this.badge.fillOpacity = textOpacity * (1 - lean);
   }
 }
 

@@ -9,17 +9,20 @@ const DRAG_THRESHOLD = 4;
 /** Degrees of tilt or turn per pixel of option-drag. */
 const ORBIT_RATE = 0.25;
 
-/** Safari's non-standard pinch event. */
+/** Safari's non-standard pinch and rotate event. */
 interface GestureEvent extends UIEvent {
   scale: number;
+  /** Degrees, clockwise. */
+  rotation: number;
   clientX: number;
   clientY: number;
 }
 
 /**
  * Trackpad and mouse navigation. Pinch (or ctrl + scroll) zooms at the pointer,
- * two-finger scroll or drag pans, option + drag tilts and turns. Taking over the
- * camera stops any scene camera move until the view is reset or the scene changes.
+ * two-finger scroll or drag pans, two-finger rotate (Safari only) or option + drag
+ * turns, and option + drag also tilts. Taking over the camera stops any scene camera
+ * move until the view is reset or the scene changes.
  */
 export function mountViewControls(stage: Stage, director: Director) {
   const app = document.getElementById('app')!;
@@ -57,17 +60,23 @@ export function mountViewControls(stage: Stage, director: Director) {
     { passive: false },
   );
 
+  // Safari reports trackpad pinch and rotate as gesture events rather than wheel events.
+  // Chrome on macOS has no rotate equivalent.
   let gestureStartZoom = 1;
+  let gestureStartTurn = 0;
   app.addEventListener('gesturestart', (e) => {
     e.preventDefault();
     gesturing = true;
     takeOver();
     gestureStartZoom = view.zoom;
+    gestureStartTurn = view.turn;
   });
   app.addEventListener('gesturechange', (e) => {
     e.preventDefault();
     const g = e as GestureEvent;
     zoomAt(g.clientX, g.clientY, gestureStartZoom * g.scale);
+    // Turning the fingers clockwise turns the diagram clockwise on screen.
+    view.turn = gestureStartTurn + g.rotation;
   });
   app.addEventListener('gestureend', (e) => {
     e.preventDefault();

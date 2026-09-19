@@ -163,7 +163,7 @@ export function diagramObstacles(stage: Stage, nodes: Map<string, NodeView>, run
   for (const [id, cluster] of runtime.clusters) {
     if (cluster.state.appear > 0.1) project(cluster.corners, id);
   }
-  for (const selector of ['#caption', '#nav', '.deck-title:not(.is-gone)']) {
+  for (const selector of ['#caption', '#nav', '.deck-title:not(.is-gone)', '#info:not([hidden])']) {
     const el = document.querySelector(selector);
     if (!el) continue;
     const r = el.getBoundingClientRect();

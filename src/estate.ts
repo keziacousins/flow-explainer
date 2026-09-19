@@ -34,7 +34,18 @@ const fetchers = d.set('fetcher', providerKeys, {
   runtime: { kind: 'replicas', count: 2 },
 });
 
-const scheduler = d.node('scheduler', { label: 'Fetch scheduler', detail: 'Cron and backoff', at: [-15.5, 5.2] });
+const scheduler = d.node('scheduler', {
+  label: 'Fetch scheduler',
+  detail: 'Cron and backoff',
+  at: [-15.5, 5.2],
+  info: {
+    about: 'Decides when each provider is due a refresh, and backs off providers that are failing.',
+    facts: [
+      ['Owner', 'Supply team'],
+      ['Full refresh', 'Every 6 hours'],
+    ],
+  },
+});
 const raw = d.node('raw', { label: 'Raw inventory', detail: 'Object store', role: 'data', shape: 'db', at: [-15.5, 0] });
 const partners = d.node('partners', {
   label: 'Push partners',
@@ -63,6 +74,13 @@ const changes = d.node('changes', {
   shape: 'queue',
   at: [-5.8, 0],
   runtime: { kind: 'partitions', count: 24 },
+  info: {
+    about: 'Every normalised change to rates, availability or content, keyed by hotel so changes to one hotel stay in order.',
+    facts: [
+      ['Retention', '7 days'],
+      ['Peak rate', '~40k changes/s'],
+    ],
+  },
 });
 
 // Projections and read stores
@@ -87,6 +105,14 @@ const index = d.node('index', {
   role: 'data',
   at: [5.4, 3.45],
   runtime: { kind: 'shards', count: 30 },
+  info: {
+    about: 'Every bookable package held in memory, split into 30 slices by hotel. A search asks every slice and merges the answers.',
+    facts: [
+      ['Owner', 'Search team'],
+      ['Rebuilt from', 'Package builder'],
+      ['p99 query', '~40 ms'],
+    ],
+  },
 });
 const rates = d.node('rates', {
   label: 'Rate cache',
@@ -134,6 +160,10 @@ const router = d.node('router', {
   role: 'edge',
   at: [15.5, 0],
   runtime: { kind: 'replicas', count: 12 },
+  info: {
+    about: 'The single GraphQL endpoint for web and mobile. Splits each query into calls to the subgraphs that own the data, then stitches the answers together.',
+    facts: [['Owner', 'Platform team']],
+  },
 });
 const shoppers = d.node('shoppers', { label: 'Shoppers', role: 'client', shape: 'actor', at: [19.6, 0] });
 

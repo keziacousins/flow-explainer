@@ -69,6 +69,7 @@ export class Cluster {
     this.mesh = new THREE.InstancedMesh(geometry, solidMaterial(true), count);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -10;
+    this.mesh.userData.nodeId = model.id;
 
     const matrix = new THREE.Matrix4();
     for (let i = 0; i < count; i++) {

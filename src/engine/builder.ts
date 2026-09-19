@@ -5,6 +5,7 @@ import type {
   FlowStep,
   HopOptions,
   Model,
+  NodeInfo,
   NodeModel,
   Role,
   Runtime,
@@ -61,15 +62,15 @@ const DEFAULT_SIZE: Record<Shape, [number, number]> = {
 
 /**
  * Rough width a label needs, in world units, from its length. Labels are 0.3 units tall
- * in IBM Plex Sans; room is added for padding and a runtime badge.
+ * in IBM Plex Sans; room is added for padding.
  */
-function labelWidth(label: string, shape: Shape, runtime?: Runtime) {
+function labelWidth(label: string, shape: Shape) {
   if (shape === 'actor') return 0;
   const text = label.length * 0.145;
   // Text sits centred inside an ellipse, where there's less usable width than in a box.
   if (shape === 'db') return text / 0.72 + 0.3;
   const padding = shape === 'queue' ? 1 : 0.6;
-  return text + padding + (runtime && runtime.count > 1 ? 0.45 : 0);
+  return text + padding;
 }
 
 /** A node set: several nodes described together. Its id selects all members. */
@@ -98,6 +99,7 @@ interface NodeInput {
   at: [number, number];
   size?: [number, number];
   runtime?: Runtime;
+  info?: NodeInfo;
 }
 
 interface SetInput {
@@ -107,6 +109,7 @@ interface SetInput {
   shape?: Shape;
   size?: [number, number];
   runtime?: Runtime | ((key: string, i: number) => Runtime | undefined);
+  info?: (key: string, i: number) => NodeInfo | undefined;
   layout: Layout;
 }
 
@@ -196,8 +199,9 @@ export class DiagramBuilder {
       shape,
       pos: input.at,
       // Boxes grow to fit their label rather than letting it spill out.
-      size: [Math.max(w, labelWidth(input.label, shape, input.runtime)), h],
+      size: [Math.max(w, labelWidth(input.label, shape)), h],
       runtime: input.runtime,
+      info: input.info,
     });
     return id;
   }
@@ -213,7 +217,7 @@ export class DiagramBuilder {
     // Members share one width, wide enough for the longest label.
     const shape = input.shape ?? 'box';
     const [w, h] = input.size ?? DEFAULT_SIZE[shape];
-    const width = Math.max(w, ...labels.map((l, i) => labelWidth(l, shape, runtimes[i])));
+    const width = Math.max(w, ...labels.map((l) => labelWidth(l, shape)));
     const byKey = new Map<string, string>();
     keys.forEach((key, i) => {
       const nodeId = this.node(`${id}.${key}`, {
@@ -223,6 +227,7 @@ export class DiagramBuilder {
         shape,
         size: [width, h],
         runtime: runtimes[i],
+        info: input.info?.(key, i),
         at: positions[i],
       });
       byKey.set(key, nodeId);

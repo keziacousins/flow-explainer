@@ -3,11 +3,22 @@ import type { NodeModel, Shape } from './model';
 
 /** Offset between the stacked cards drawn behind nodes with runtime multiplicity (flat view). */
 export const STACK_OFFSET = 0.13;
-export const STACK_LAYERS = 2;
+
+/**
+ * Cards behind a node in the flat view, graded by how many instances it runs as: one for
+ * a couple, two for a handful, three for many. Exact counts live in the info box and callouts.
+ */
+export function cardCount(node: NodeModel) {
+  const n = node.runtime?.count ?? 1;
+  if (n < 2) return 0;
+  if (n < 4) return 1;
+  if (n < 10) return 2;
+  return 3;
+}
 
 /** How far a node's stacked cards extend up and to the right of it. */
 export function stackDepth(node: NodeModel) {
-  return node.runtime && node.runtime.count > 1 ? STACK_OFFSET * STACK_LAYERS : 0;
+  return cardCount(node) * STACK_OFFSET;
 }
 
 export interface Footprint {

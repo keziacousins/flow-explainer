@@ -27,6 +27,14 @@ export interface Runtime {
  */
 export type Selector = string | string[];
 
+/** Shown in the info box when a node is clicked. */
+export interface NodeInfo {
+  /** A sentence or two on what the node does. */
+  about?: string;
+  /** Label and value pairs, e.g. ['Owner', 'Search team']. */
+  facts?: [string, string][];
+}
+
 export interface NodeModel {
   id: string;
   label: string;
@@ -36,6 +44,7 @@ export interface NodeModel {
   pos: [number, number];
   size: [number, number];
   runtime?: Runtime;
+  info?: NodeInfo;
 }
 
 export interface EdgeModel {

@@ -5,6 +5,7 @@ import { Director } from './engine/director';
 import { EdgeView } from './engine/edge';
 import { Graph } from './engine/graph';
 import { GroupView } from './engine/group';
+import { mountInspector } from './engine/inspector';
 import { NodeView } from './engine/node';
 import { routeEdges } from './engine/routing';
 import { RuntimeLayer } from './engine/runtime';
@@ -53,6 +54,8 @@ document.title = estate.title;
 const director = new Director(stage, graph, nodes, edges, groups, runtime, traffic, callouts);
 mountUI(director);
 mountViewControls(stage, director);
+// After the view controls, so their drag detection runs first.
+mountInspector(stage, graph, nodes, runtime, director);
 
 const sceneFromHash = () => {
   const n = parseInt(location.hash.slice(1), 10);

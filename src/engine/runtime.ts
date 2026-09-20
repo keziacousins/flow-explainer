@@ -3,9 +3,10 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import type { Graph } from './graph';
-import type { NodeModel, Route, Runtime } from './model';
+import { DEFAULT_ROUTE, type NodeModel, type Route, type Runtime } from './model';
 import { smoothstep, type NodeView } from './node';
 import { palette } from './palette';
+import type { Random } from './random';
 import { footprint, solidGeometry, solidMaterial } from './shapes';
 import type { Stage } from './stage';
 
@@ -19,12 +20,6 @@ const SLAB_INSET = 0.94;
 /** Towers taller than this many slabs are compressed to fit. */
 const MAX_SLABS_TALL = 40;
 const SHEET_PAD = 1.4;
-
-const DEFAULT_ROUTE: Record<Runtime['kind'], Route> = {
-  replicas: 'any',
-  shards: 'all',
-  partitions: 'key',
-};
 
 /** Roles that aren't ours to run, so they have no runtime instances. */
 const OUTSIDE = new Set(['external', 'client']);
@@ -107,16 +102,16 @@ export class Cluster {
   }
 
   /** Instances a request to this node reaches. `key` picks consistently for the same key. */
-  pick(key: number, route: Route = this.route): number[] {
+  pick(key: number, random: Random, route: Route = this.route): number[] {
     if (route === 'all') return this.positions.map((_, i) => i);
     if (route === 'key') return [key % this.count];
-    return [Math.floor(Math.random() * this.count)];
+    return [Math.floor(random() * this.count)];
   }
 
   /** Instances a request leaves from when no earlier hop says which. */
-  origin(): number[] {
+  origin(random: Random): number[] {
     if (this.route === 'all') return this.positions.map((_, i) => i);
-    return [Math.floor(Math.random() * this.count)];
+    return [Math.floor(random() * this.count)];
   }
 
   update(decay: number) {
@@ -167,7 +162,7 @@ export class RuntimeLayer {
     box.expandByScalar(SHEET_PAD);
     const size = box.getSize(new THREE.Vector2());
     const centre = box.getCenter(new THREE.Vector2());
-    this.sheetMaterial = new THREE.MeshBasicMaterial({ color: palette.bg, transparent: true, depthWrite: false });
+    this.sheetMaterial = new THREE.MeshBasicMaterial({ color: palette.bg, transparent: true, depthWrite: false, fog: false });
     const sheet = new THREE.Mesh(new THREE.PlaneGeometry(size.x, size.y), this.sheetMaterial);
     sheet.position.set(centre.x, centre.y, -0.05);
     sheet.renderOrder = -5;
@@ -175,7 +170,7 @@ export class RuntimeLayer {
     const edge = new LineGeometry();
     const [x0, y0, x1, y1] = [box.min.x, box.min.y, box.max.x, box.max.y];
     edge.setPositions([x0, y0, -0.05, x1, y0, -0.05, x1, y1, -0.05, x0, y1, -0.05, x0, y0, -0.05]);
-    this.sheetEdge = new LineMaterial({ linewidth: 1, transparent: true, depthWrite: false });
+    this.sheetEdge = new LineMaterial({ linewidth: 1, transparent: true, depthWrite: false, fog: false });
     const edgeLine = new Line2(edge, this.sheetEdge);
     edgeLine.renderOrder = -4;
 

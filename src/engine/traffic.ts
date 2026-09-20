@@ -2,9 +2,11 @@ import * as THREE from 'three';
 import { gsap } from 'gsap';
 import type { EdgeView } from './edge';
 import type { Graph } from './graph';
-import type { FlowModel, HopOptions, PlayModel, Route, SceneModel, StreamModel } from './model';
+import { FlowRun, type ClusterFacts, type FlowEvent, type FlowWorld } from './flow';
+import type { HopOptions, PlayModel, Route, SceneModel, StreamModel } from './model';
 import { smoothstep, type NodeView } from './node';
 import { palette, reducedMotion } from './palette';
+import type { Random } from './random';
 import type { RuntimeLayer } from './runtime';
 
 const TRAIL = 10;
@@ -15,8 +17,6 @@ const STREAM_SPEED = reducedMotion ? 1 : 2.6;
 /** Travel time limits in seconds, so long edges don't crawl and short ones don't blink. */
 const MIN_TRAVEL = 0.35;
 const MAX_TRAVEL = 1.6;
-/** Default pause at each node before a flow's next step. */
-const HOLD = 0.12;
 /** Default pause between repeats of a playing flow. */
 const PAUSE = 2;
 /** Runtime packets are smaller than logical ones; there are many more of them. */
@@ -70,6 +70,7 @@ class PacketLayer {
         blending: THREE.AdditiveBlending,
         depthTest,
         depthWrite: false,
+        fog: false,
       }),
       capacity * TRAIL,
     );
@@ -149,9 +150,10 @@ class PacketLayer {
 /**
  * Every packet on screen: background streams and flows, on the logical layer and,
  * where it's showing, mirrored on the runtime layer. Keeps its own clock so timers
- * and packets stay in step with the frame loop.
+ * and packets stay in step with the frame loop. Flows themselves run in `flow.ts`;
+ * this is the `FlowWorld` they run against, turning their events into packets.
  */
-export class Traffic {
+export class Traffic implements FlowWorld {
   /** Packets on the logical layer. */
   readonly logical = new PacketLayer(2048, 2.5, false);
   /** Packets between runtime instances, drawn beneath the fog and hidden behind towers. */
@@ -169,6 +171,7 @@ export class Traffic {
     readonly nodes: Map<string, NodeView>,
     readonly edges: Map<string, EdgeView>,
     readonly runtime: RuntimeLayer,
+    readonly random: Random = Math.random,
   ) {}
 
   /** Stop the current scene's traffic and start the next scene's after `delay` seconds. */
@@ -192,8 +195,50 @@ export class Traffic {
     else this.timers.push({ at: this.now + seconds, fn });
   }
 
-  travelTime(length: number, speed = FLOW_SPEED) {
+  /** How long a packet takes to cross an edge, by id (what flows ask for). */
+  travelTime(edge: string, speed?: number) {
+    return this.travel(this.edges.get(edge)!.length, speed);
+  }
+
+  travel(length: number, speed = FLOW_SPEED) {
     return Math.min(Math.max(length / speed, MIN_TRAVEL), MAX_TRAVEL);
+  }
+
+  /** What a node runs as, for a flow deciding which instances a hop reaches. */
+  cluster(id: string): ClusterFacts | undefined {
+    const cluster = this.runtime.clusters.get(id);
+    return cluster && { count: cluster.count, route: cluster.route };
+  }
+
+  lowered(from: string, to: string) {
+    return this.runtime.active(from, to);
+  }
+
+  warn(message: string) {
+    console.warn(message);
+  }
+
+  /** Draw what a flow just did. */
+  emit(event: FlowEvent) {
+    if (event.type === 'arrive') {
+      this.nodes.get(event.node)?.flash();
+      return;
+    }
+    if (event.type === 'drop') {
+      this.nodes.get(event.node)?.fail();
+      return;
+    }
+    const { from, to, opts, packets, gap, duration, fromPods, toPods } = event;
+    const edge = this.edges.get(event.edge)!;
+    const color = this.colorFor(from, opts.kind);
+    const size = opts.size ?? (opts.kind === 'response' ? 0.8 : 1);
+    const route = fromPods || toPods ? { from: fromPods ?? [undefined], to: toPods ?? [undefined] } : undefined;
+    for (let k = 0; k < packets; k++) {
+      this.after(k * gap, () => {
+        this.launch(edge, event.reverse, duration, { color, size, onArrive: () => this.nodes.get(to)?.flash() });
+        if (route) this.launchUnderneath(from, to, route, duration, color, size);
+      });
+    }
   }
 
   /** A packet along a logical edge. */
@@ -237,8 +282,8 @@ export class Traffic {
     const source = this.runtime.clusters.get(from);
     const target = this.runtime.clusters.get(to);
     return {
-      from: source ? (opts.fromPods ?? source.origin()) : [undefined],
-      to: target ? (opts.toPods ?? target.pick(key, opts.route)) : [undefined],
+      from: source ? (opts.fromPods ?? source.origin(this.random)) : [undefined],
+      to: target ? (opts.toPods ?? target.pick(key, this.random, opts.route)) : [undefined],
     };
   }
 
@@ -353,7 +398,7 @@ class StreamRunner {
         source: forward ? edge.from : edge.to,
         target: forward ? edge.to : edge.from,
         // Stagger lanes so they don't all fire together.
-        next: now + Math.random() * this.interval,
+        next: now + traffic.random() * this.interval,
       });
     }
   }
@@ -363,7 +408,7 @@ class StreamRunner {
     if (rate === 0) return;
     for (const lane of this.lanes) {
       while (now >= lane.next) {
-        lane.next += this.interval * (1 + jitter * (Math.random() * 2 - 1));
+        lane.next += this.interval * (1 + jitter * (this.traffic.random() * 2 - 1));
         const live = lane.edge.state.appear > 0.99 || this.traffic.canRevealHidden;
         if (!live) continue;
         for (let b = 0; b < burst; b++) this.traffic.after(b * 0.07, () => this.send(lane, kind, speed));
@@ -373,228 +418,11 @@ class StreamRunner {
 
   private send(lane: StreamRunner['lanes'][number], kind: StreamModel['kind'], speed?: number) {
     const t = this.traffic;
-    const duration = t.travelTime(lane.edge.length, speed ?? t.streamSpeed);
+    const duration = t.travel(lane.edge.length, speed ?? t.streamSpeed);
     const color = t.colorFor(lane.source, kind);
     const size = kind === 'response' ? 0.8 : 0.9;
     t.launch(lane.edge, lane.reverse, duration, { color, size });
-    const route = t.lower(lane.source, lane.target, randomKey(), { route: this.spec.route });
+    const route = t.lower(lane.source, lane.target, Math.floor(t.random() * 1e6), { route: this.spec.route });
     if (route) t.launchUnderneath(lane.source, lane.target, route, duration, color, size);
-  }
-}
-
-function randomKey() {
-  return Math.floor(Math.random() * 1e6);
-}
-
-interface Token {
-  node: string;
-  /** Nodes visited on the way here, most recent last. `respond` walks back along it. */
-  path: string[];
-  /** Instances holding this token at `node`, when the runtime layer is showing. */
-  pods?: number[];
-  /** Instances used at each node visited, so responses and gathers return to the caller. */
-  seen: Map<string, number[]>;
-  /** Stands in for a routing key (hotel id, search id) so keyed hops pick consistently. */
-  key: number;
-  /** Index of the step this token runs next. */
-  stage: number;
-  /** Arrived at a gather point and waiting for the others. */
-  waiting: boolean;
-}
-
-/**
- * One run of a flow. Each packet is a token that works through the steps on its own,
- * so fanned-out packets proceed independently; `gather` is where they join up again.
- */
-class FlowRun {
-  cancelled = false;
-  private tokens = new Set<Token>();
-  private finished = false;
-
-  constructor(
-    private traffic: Traffic,
-    private flow: FlowModel,
-    private onDone: () => void,
-  ) {}
-
-  start() {
-    this.traffic.nodes.get(this.flow.start)?.flash();
-    const token: Token = {
-      node: this.flow.start,
-      path: [],
-      key: randomKey(),
-      seen: new Map(),
-      stage: 0,
-      waiting: false,
-    };
-    this.tokens.add(token);
-    this.step(token);
-  }
-
-  private step(t: Token) {
-    if (this.cancelled) return;
-    const s = this.flow.steps[t.stage];
-    const graph = this.traffic.graph;
-    if (!s) return this.remove(t);
-
-    switch (s.op) {
-      case 'hold':
-        this.traffic.after(s.seconds, () => this.advance(t));
-        return;
-
-      case 'send': {
-        const [target] = graph.neighbours(t.node, s.to);
-        if (!target) return this.lost(t, `nothing matching ${JSON.stringify(s.to)} is connected to ${t.node}`);
-        this.hop(t, target, s.opts, () => this.arrived(t, s.opts));
-        return;
-      }
-
-      case 'fanout': {
-        const targets = graph.neighbours(t.node, s.to);
-        if (!targets.length) return this.lost(t, `nothing matching ${JSON.stringify(s.to)} is connected to ${t.node}`);
-        this.tokens.delete(t);
-        targets.forEach((target, i) => {
-          // Each branch carries different data, so give it its own key.
-          const child: Token = {
-            ...t,
-            path: [...t.path],
-            key: t.key + (i + 1) * 7919,
-            seen: new Map(t.seen),
-            waiting: false,
-          };
-          this.tokens.add(child);
-          this.traffic.after(i * (s.opts.stagger ?? 0), () =>
-            this.hop(child, target, s.opts, () => this.arrived(child, s.opts)),
-          );
-        });
-        return;
-      }
-
-      case 'respond': {
-        const target = t.path[t.path.length - 1];
-        if (!target) return this.lost(t, `respond at ${t.node} has nowhere to go back to`);
-        this.hop(t, target, s.opts, () => this.arrived(t, s.opts), true);
-        return;
-      }
-
-      case 'gather': {
-        const wait = () => {
-          t.waiting = true;
-          this.checkJoins();
-        };
-        if (t.node === s.to) return wait();
-        this.hop(t, s.to, s.opts, () => {
-          this.traffic.nodes.get(s.to)?.flash();
-          wait();
-        });
-        return;
-      }
-
-      case 'drop':
-        if (s.at === undefined || graph.nodeIds(s.at).has(t.node)) {
-          this.traffic.nodes.get(t.node)?.fail();
-          this.remove(t);
-        } else this.advance(t);
-        return;
-    }
-  }
-
-  /** Send the token's packets to `target`, on both layers. Moves the token when the last lands. */
-  private hop(t: Token, target: string, opts: HopOptions, done: () => void, back = false) {
-    if (this.cancelled) return;
-    const traffic = this.traffic;
-    const link = traffic.graph.between(t.node, target);
-    if (!link) return this.lost(t, `no edge between ${t.node} and ${target}`);
-    const edge = traffic.edges.get(link.edge.id)!;
-    const duration = traffic.travelTime(edge.length, opts.speed);
-    const count = opts.packets ?? 1;
-    const color = traffic.colorFor(t.node, opts.kind);
-    const size = opts.size ?? (opts.kind === 'response' ? 0.8 : 1);
-    const route = traffic.lower(t.node, target, t.key, {
-      fromPods: t.pods,
-      toPods: t.seen.get(target),
-      route: opts.route,
-    });
-    const from = t.node;
-    if (route && !t.pods) {
-      // First hop on the runtime layer: remember which instances it left from.
-      t.pods = route.from.filter((i): i is number => i !== undefined);
-      if (t.pods.length) t.seen.set(from, t.pods);
-    }
-
-    for (let k = 0; k < count; k++) {
-      const last = k === count - 1;
-      traffic.after(k * (opts.gap ?? 0.08), () => {
-        traffic.launch(edge, link.reverse, duration, {
-          color,
-          size,
-          onArrive: () => {
-            if (this.cancelled) return;
-            if (!last) return traffic.nodes.get(target)?.flash();
-            if (back) t.path.pop();
-            else t.path.push(from);
-            t.node = target;
-            t.pods = route?.to.filter((i): i is number => i !== undefined);
-            if (t.pods?.length) t.seen.set(target, t.pods);
-            else t.pods = undefined;
-            done();
-          },
-        });
-        if (route) traffic.launchUnderneath(from, target, route, duration, color, size);
-      });
-    }
-  }
-
-  private arrived(t: Token, opts: HopOptions) {
-    t.stage++;
-    this.traffic.nodes.get(t.node)?.flash();
-    this.traffic.after(opts.hold ?? HOLD, () => this.step(t));
-  }
-
-  private advance(t: Token) {
-    t.stage++;
-    this.step(t);
-  }
-
-  private remove(t: Token) {
-    this.tokens.delete(t);
-    this.checkJoins();
-    if (this.tokens.size === 0 && !this.finished) {
-      this.finished = true;
-      this.onDone();
-    }
-  }
-
-  private lost(t: Token, why: string) {
-    console.warn(`Flow "${this.flow.id}": ${why}`);
-    this.remove(t);
-  }
-
-  /** Release a gather once every token that could still reach it is waiting there. */
-  private checkJoins() {
-    this.flow.steps.forEach((s, i) => {
-      if (s.op !== 'gather') return;
-      const waiting = [...this.tokens].filter((t) => t.stage === i && t.waiting);
-      if (!waiting.length) return;
-      const pending = [...this.tokens].some((t) => t.stage < i || (t.stage === i && !t.waiting));
-      if (pending) return;
-      waiting.forEach((t) => this.tokens.delete(t));
-      // The joined token sits on whichever instances the gathered packets reached.
-      const pods = [...new Set(waiting.flatMap((t) => t.pods ?? []))];
-      // Its way back is the way the first of them came, up to the gather point.
-      const path = waiting[0].path;
-      const at = path.lastIndexOf(s.to);
-      const joined: Token = {
-        node: s.to,
-        path: at >= 0 ? path.slice(0, at) : path,
-        key: waiting[0].key,
-        pods: pods.length ? pods : undefined,
-        seen: new Map(waiting[0].seen),
-        stage: i + 1,
-        waiting: false,
-      };
-      this.tokens.add(joined);
-      this.traffic.after(s.opts.hold ?? HOLD, () => this.step(joined));
-    });
   }
 }

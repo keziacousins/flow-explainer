@@ -7,6 +7,7 @@ import { GroupView } from './group';
 import { mountInspector } from './inspector';
 import type { Model } from './model';
 import { NodeView } from './node';
+import { makeRandom } from './random';
 import { routeEdges } from './routing';
 import { RuntimeLayer } from './runtime';
 import { Stage } from './stage';
@@ -32,7 +33,9 @@ export function playDeck(model: Model) {
   );
   const runtime = new RuntimeLayer(graph, nodes);
   const callouts = new Callouts(labelLayer, document.querySelector<SVGSVGElement>('#leaders')!);
-  const traffic = new Traffic(graph, nodes, edges, runtime);
+  // `?seed=<n>` makes traffic repeat exactly, for comparing runs and recording.
+  const seed = new URLSearchParams(location.search).get('seed');
+  const traffic = new Traffic(graph, nodes, edges, runtime, seed ? makeRandom(Number(seed)) : Math.random);
 
   for (const g of groups.values()) stage.scene.add(g.group);
   for (const n of nodes.values()) stage.scene.add(n.group);

@@ -27,6 +27,7 @@ export interface Runtime {
  */
 export type Selector = string | string[];
 
+
 /** Shown in the info box when a node is clicked. */
 export interface NodeInfo {
   /** A sentence or two on what the node does. */
@@ -65,6 +66,13 @@ export interface GroupModel {
 
 export type PacketKind = 'request' | 'response' | 'error';
 export type Route = 'any' | 'all' | 'key';
+/** How a request spreads over a node's instances, when its runtime doesn't say. */
+export const DEFAULT_ROUTE: Record<Runtime['kind'], Route> = {
+  replicas: 'any',
+  shards: 'all',
+  partitions: 'key',
+};
+
 
 export interface HopOptions {
   kind?: PacketKind;

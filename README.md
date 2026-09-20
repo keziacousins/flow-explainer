@@ -49,3 +49,8 @@ The code in this repository was written by Claude, in [Claude Code](https://clau
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+That covers the code here. Dependencies keep their own licences, and one is not
+open source: [GSAP](https://gsap.com/standard-license) ships under its standard
+"no charge" licence rather than an OSI one, so check its terms apply to you
+before building on this.

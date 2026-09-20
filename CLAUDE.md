@@ -4,12 +4,12 @@ Animated, explorable architecture diagrams in three.js: slide-like scenes, glowi
 
 ## Where this is heading
 
-- **Real data comes from a graph database** in another project: about 300 logical nodes and about 3,000 at the infrastructure level. That project also has an xyflow frontend with some layout information, which may or may not suit this one. The next big step is an importer from that export into `Model`, plus automatic layout (probably elkjs) with manual overrides.
+- **Real data will be imported rather than written by hand.** The next big step is an importer from a graph export into `Model`, plus automatic layout (probably elkjs) with manual overrides. An export may arrive carrying layout hints of its own, which may or may not suit this renderer.
 - **Diagrams are written in TypeScript for now** (`src/engine/builder.ts`), deliberately not in a text DSL until the API settles. `Model` (`src/engine/model.ts`) is plain data with no functions, so a text DSL can later compile to it. Keep it that way.
 - **Decks** live in `src/decks/<id>/index.ts`, each default-exporting a built `Model`. They're discovered automatically (`src/decks/index.ts`, via `import.meta.glob`) and loaded only when opened. Current decks, all made up:
   - `ota`: the main OTA example (ingestion, projections, read stores, a GraphQL search API);
   - `checkout`: the smallest complete deck, the one to copy when starting a new deck;
-  - `synthetic`: a seeded, generated estate at roughly real scale (300 services, ~3,000 instances), for finding performance and crowding problems. It's been measured at ~55–60 fps in Chromium.
+  - `synthetic`: a seeded, generated estate at the scale this has to handle (300 services, ~3,000 instances), for finding performance and crowding problems. It's been measured at ~55–60 fps in Chromium.
 
 ## Commands
 

@@ -6,7 +6,10 @@ Animated, explorable architecture diagrams in three.js: slide-like scenes, glowi
 
 - **Real data comes from a graph database** in another project: about 300 logical nodes and about 3,000 at the infrastructure level. That project also has an xyflow frontend with some layout information, which may or may not suit this one. The next big step is an importer from that export into `Model`, plus automatic layout (probably elkjs) with manual overrides.
 - **Diagrams are written in TypeScript for now** (`src/engine/builder.ts`), deliberately not in a text DSL until the API settles. `Model` (`src/engine/model.ts`) is plain data with no functions, so a text DSL can later compile to it. Keep it that way.
-- `src/estate.ts` is **made-up** OTA data used to exercise the engine: ingestion, projections, read stores, a GraphQL search API.
+- **Decks** live in `src/decks/<id>/index.ts`, each default-exporting a built `Model`. They're discovered automatically (`src/decks/index.ts`, via `import.meta.glob`) and loaded only when opened. Current decks, all made up:
+  - `ota`: the main OTA example (ingestion, projections, read stores, a GraphQL search API);
+  - `checkout`: the smallest complete deck, the one to copy when starting a new deck;
+  - `synthetic`: a seeded, generated estate at roughly real scale (300 services, ~3,000 instances), for finding performance and crowding problems. It's been measured at ~55–60 fps in Chromium.
 
 ## Commands
 
@@ -17,11 +20,11 @@ npm run build      # tsc --noEmit, then vite build (the >500 kB chunk warning is
 npx tsc --noEmit   # type-check only
 ```
 
-There are no tests. Check changes visually: run the dev server, open `http://localhost:<port>/#<scene>`, and screenshot with the Playwright MCP tools. Hash changes switch scenes without reloading; add a throwaway query string (`?r=1#9`) to force a fresh load. Viewer controls: ← → / Space / click empty space to step, click a shape or tower slab for its info box (Escape closes it), pinch or ctrl+scroll to zoom, scroll or drag to pan, option+drag to orbit, two-finger rotate to turn (Safari only), `0` to reset the view. The user tests in **Safari**. Trackpad pinch and rotate arrive there as `gesture*` events, not ctrl+wheel; both paths are handled in `controls.ts`. Chrome on macOS has no rotate gesture.
+There are no tests yet. Check changes visually: run the dev server, open `http://localhost:<port>/?deck=<id>#<scene>`, and screenshot with the Playwright MCP tools. Without `?deck=` you get the deck picker. Hash changes switch scenes without reloading; add a throwaway parameter (`?deck=ota&r=1#9`) to force a fresh load. Switching deck is always a page load, so the engine never has to tear itself down. Viewer controls: ← → / Space / click empty space to step, click a shape or tower slab for its info box (Escape closes it), pinch or ctrl+scroll to zoom, scroll or drag to pan, option+drag to orbit, two-finger rotate to turn (Safari only), `0` to reset the view. The user tests in **Safari**. Trackpad pinch and rotate arrive there as `gesture*` events, not ctrl+wheel; both paths are handled in `controls.ts`. Chrome on macOS has no rotate gesture.
 
 ## Architecture
 
-`src/main.ts` wires everything together. Data flows one way: **builder → Model → Graph → views, driven by Director and Traffic.**
+`src/main.ts` reads `?deck=` and either shows the picker (`src/picker.ts`) or calls `playDeck(model)` (`src/engine/play.ts`), which wires everything together. Data flows one way: **builder → Model → Graph → views, driven by Director and Traffic.**
 
 | File | Role |
 |---|---|
@@ -73,6 +76,11 @@ A flow is a list of steps: `send`, `fanout`, `respond`, `gather`, `drop`, `hold`
 - `@types/three` and the `three/addons/...` imports are used throughout. TypeScript is v7 (the native compiler).
 
 ## Known limits and likely next steps
+
+Found with the synthetic deck:
+- **Title overlap when zoomed far out.** The deck title and subtitle can overlap the top of a very zoomed-out diagram; the clear strip at the top is a fixed fraction of the screen.
+- **Cross-domain connection spaghetti** from automatic routing. Needs a real layout, and perhaps bundling of edges between groups.
+
 
 1. Graph DB importer and automatic layout. Real layouts will need more front-to-back spacing for corner views.
 2. Level of detail for ~300 nodes: hide unfocused labels when zoomed out; a scale rule for very tall towers (linear now, compressed past 40 slabs).

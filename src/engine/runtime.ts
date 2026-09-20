@@ -222,8 +222,11 @@ export class RuntimeLayer {
     this.sheetMaterial.opacity = anyVisible ? 0.3 + 0.65 * this.state.fog : lean * 0.5;
     this.sheetEdge.color.copy(this.sheetColor);
     this.sheetEdge.opacity = lean * 0.8;
-    // The dot grid sits on the sheet; thin it out when looking through to the towers.
-    (stage.grid.material as THREE.PointsMaterial).opacity = 0.35 + 0.65 * this.state.fog;
+    // The dot grid sits on the sheet; thin it out when looking through to the towers, and
+    // fade it when zoomed out so far that the dots crowd into a moiré texture.
+    const spacing = stage.pixelsPerUnit * 0.5;
+    (stage.grid.material as THREE.PointsMaterial).opacity =
+      (0.35 + 0.65 * this.state.fog) * smoothstep(5, 12, spacing);
   }
 }
 

@@ -1,4 +1,4 @@
-import { column, diagram, type FlowBuilder } from './engine/builder';
+import { column, diagram, type FlowBuilder } from '../../engine/builder';
 
 /** A made-up OTA estate: inventory ingestion on the left, search on the right. */
 const d = diagram({
@@ -381,4 +381,4 @@ d.scene({
   ],
 });
 
-export const estate = d.build();
+export default d.build();

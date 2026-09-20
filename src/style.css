@@ -310,7 +310,8 @@ body {
 }
 
 @media (max-width: 720px) {
-  #nav .hint {
+  #nav .hint,
+  .all-decks {
     display: none;
   }
 
@@ -414,4 +415,91 @@ body {
   stroke-width: 1;
   stroke-opacity: 0.8;
   visibility: hidden;
+}
+
+.all-decks {
+  position: absolute;
+  top: var(--edge);
+  right: var(--edge);
+  font-size: 0.8125rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.all-decks:hover {
+  color: var(--text);
+}
+
+.all-decks:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+/* Picker: the page listing every deck, shown without ?deck=. */
+body.is-picker {
+  overflow: auto;
+}
+
+body.is-picker #app {
+  display: none;
+}
+
+#picker {
+  max-width: 40rem;
+  padding: calc(var(--edge) * 1.5) var(--edge);
+}
+
+#picker h1 {
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+
+#picker .picker-note {
+  margin-top: 0.75rem;
+  color: #9aa8c0;
+}
+
+#picker ul {
+  margin-top: 2rem;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+#picker a {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem 1.25rem;
+  color: inherit;
+  text-decoration: none;
+  border-left: 2px solid var(--faint);
+  border-radius: 2px;
+  transition: border-color 0.3s, background-color 0.3s;
+}
+
+#picker a:hover,
+#picker a:focus-visible {
+  background: rgb(14 22 40 / 0.8);
+  border-left-color: var(--text);
+  outline: none;
+}
+
+#picker .picker-name {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+#picker .picker-sub {
+  color: #9aa8c0;
+}
+
+#picker .picker-meta {
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }

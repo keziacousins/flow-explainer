@@ -2,6 +2,8 @@
 
 Animated architecture explainers in three.js. A diagram is stepped through as scenes, like slides. Packets flow between services to show requests, fanouts and responses. Leaning the camera back shows the runtime layer: beneath each logical service hangs a tower of the instances it actually runs as (replicas, shards, partitions), and the same flows play out across those instances.
 
+![The OTA deck, leaned back into 3D: beneath each service hangs a tower of the instances it really runs as, thirty shards under the package index.](docs/screenshot.png)
+
 Content comes in decks (`src/decks/`), all made up for now:
 - **OTA platform:** inventory ingestion on one side, search on the other, read stores in the middle.
 - **Checkout:** a minimal example to copy when writing a new deck.
@@ -39,3 +41,11 @@ export default d.build();
 ```
 
 The builder produces a plain-data model (`src/engine/model.ts`), which a text format can later compile to. See `CLAUDE.md` for the architecture, the design decisions behind it, and what's next.
+
+## Authorship
+
+The code in this repository was written by Claude, in [Claude Code](https://claude.com/claude-code). My part was direction rather than typing: the prompts, the reviews, and the taste — deciding what to build next, which of several attempts to keep, and what to throw away. Where `CLAUDE.md` records a design decision as settled, that is the shape of it: Claude proposed and implemented, I judged.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

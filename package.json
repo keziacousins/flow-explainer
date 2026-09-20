@@ -1,5 +1,5 @@
 {
-  "name": "flow-deck",
+  "name": "flow-explainer",
   "version": "1.0.0",
   "description": "Animated, explorable architecture diagrams in three.js",
   "scripts": {

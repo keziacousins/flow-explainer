@@ -70,12 +70,13 @@ export class GroupView {
       dashSize: 0.1,
       gapSize: 0.14,
       depthWrite: false,
+      fog: false,
     });
     const line = new Line2(geometry, this.material);
     line.computeLineDistances();
     line.renderOrder = 0.5;
 
-    this.fillMaterial = new THREE.MeshBasicMaterial({ color: this.flatFill, transparent: true, depthWrite: false });
+    this.fillMaterial = new THREE.MeshBasicMaterial({ color: this.flatFill, transparent: true, depthWrite: false, fog: false });
     const fill = new THREE.Mesh(new THREE.ShapeGeometry(shape, 8), this.fillMaterial);
     fill.position.z = 0.001;
     fill.renderOrder = 0.4;

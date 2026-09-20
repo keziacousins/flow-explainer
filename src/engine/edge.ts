@@ -58,6 +58,7 @@ export class EdgeView {
       gapSize: 0.12,
       depthTest: false,
       depthWrite: false,
+      fog: false,
     });
     const line = new Line2(this.geometry, this.material);
     if (model.style === 'dashed') line.computeLineDistances();

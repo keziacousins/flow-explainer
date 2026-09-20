@@ -31,7 +31,7 @@ export function makeText(opts: TextOptions): Text {
   t.anchorY = opts.anchorY ?? 'middle';
   t.renderOrder = opts.renderOrder ?? 5;
   // troika derives its glyph shader from this base material.
-  t.material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
+  t.material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, fog: false });
   t.sync();
   return t;
 }

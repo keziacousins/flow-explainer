@@ -33,6 +33,8 @@ export class Director {
   index = -1;
   /** True once the viewer has panned or zoomed; the camera stays put until reframed. */
   cameraFree = false;
+  /** Set by the 2D/3D switch to override the scene's own angles. Cleared on scene change. */
+  private flat: boolean | null = null;
   private timeline?: gsap.core.Timeline;
   private listeners: ((change: SceneChange) => void)[] = [];
 
@@ -75,6 +77,7 @@ export class Director {
     const forward = index > this.index;
     this.index = index;
     this.cameraFree = false;
+    this.flat = null;
     const scene = this.scenes[index];
     const graph = this.graph;
 
@@ -162,6 +165,20 @@ export class Director {
     for (const fn of this.listeners) fn({ index, scene, forward, accent: this.accentOf(scene) });
   }
 
+  /** Is the camera looking straight down? */
+  get isFlat() {
+    return this.stage.view.tilt < 8;
+  }
+
+  /** Switch between looking straight down and the scene's own angle. */
+  setFlat(flat: boolean) {
+    if (this.index < 0) return;
+    this.flat = flat;
+    this.cameraFree = false;
+    const view = this.framing(this.scenes[this.index]);
+    gsap.to(this.stage.view, { ...view, duration: reducedMotion ? 0.3 : 1.1, ease: 'power3.inOut' });
+  }
+
   /** Animate the camera back to the current scene's framing. */
   reframe() {
     if (this.index < 0) return;
@@ -220,8 +237,11 @@ export class Director {
   /** The view for a scene: its angles, and the position and zoom that fit its nodes. */
   private framing(scene: SceneModel) {
     const underneath = this.graph.nodeIds(scene.runtime);
-    const tilt = scene.tilt ?? (underneath.size ? RUNTIME_TILT : 0);
-    const turn = scene.turn ?? (underneath.size ? RUNTIME_TURN : 0);
+    const leaning = this.flat === false || (this.flat === null && (scene.tilt ?? (underneath.size ? RUNTIME_TILT : 0)) > 0);
+    // The switch overrides the scene: flat looks straight down, 3D uses the scene's own
+    // angle, or the standard one when the scene has none.
+    const tilt = leaning ? (scene.tilt ?? RUNTIME_TILT) : 0;
+    const turn = leaning ? (scene.turn ?? (underneath.size ? RUNTIME_TURN : 0)) : 0;
     const points: THREE.Vector3[] = [];
     for (const id of this.graph.nodeIds(scene.camera ?? scene.show)) {
       const node = this.nodes.get(id);

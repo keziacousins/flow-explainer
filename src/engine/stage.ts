@@ -71,6 +71,9 @@ export class Stage {
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color(palette.bg);
+    // Fog applies to the dot grid alone (everything else sets `fog: false`), so the grid
+    // fades into the distance instead of aliasing into a moiré haze in tilted views.
+    this.scene.fog = new THREE.Fog(palette.bg, 1, 100);
     this.grid = makeGrid(this.renderer.getPixelRatio());
     this.scene.add(this.grid);
 
@@ -222,6 +225,9 @@ export class Stage {
     camera.rotation.set(THREE.MathUtils.degToRad(tilt), 0, THREE.MathUtils.degToRad(turn), 'ZXY');
     this.forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
     camera.position.set(x, y, 0).addScaledVector(this.forward, -distance);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = distance * 0.55;
+    fog.far = distance * 1.45;
     camera.updateMatrixWorld();
   }
 
@@ -229,7 +235,7 @@ export class Stage {
     this.width = this.container.clientWidth;
     this.height = this.container.clientHeight;
     // On narrow screens the caption wraps to more lines and needs more room.
-    this.captionReserve = this.width < 720 ? 0.42 : 0.3;
+    this.captionReserve = this.width < 720 ? 0.4 : 0.27;
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
     this.composer.setSize(this.width, this.height);
@@ -279,6 +285,7 @@ function makeGrid(pixelRatio: number) {
     transparent: true,
     depthTest: false,
     depthWrite: false,
+    fog: true,
   });
   const points = new THREE.Points(geometry, material);
   points.renderOrder = 0;

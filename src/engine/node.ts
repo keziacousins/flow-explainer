@@ -81,7 +81,7 @@ export class NodeView {
       return line;
     };
     const lineMaterial = (linewidth: number) =>
-      new LineMaterial({ linewidth, transparent: true, dashed, dashSize: 0.14, gapSize: 0.1, depthWrite: false });
+      new LineMaterial({ linewidth, transparent: true, dashed, dashSize: 0.14, gapSize: 0.1, depthWrite: false, fog: false });
     const solidFor = () => {
       const m = solidMaterial(false);
       m.uniforms.uColor.value = this.accent;

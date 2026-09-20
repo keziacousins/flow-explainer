@@ -28,6 +28,7 @@ export function mountViewControls(stage: Stage, director: Director) {
   const app = document.getElementById('app')!;
   const surface = document.getElementById('stage')!;
   const reset = document.querySelector<HTMLButtonElement>('#nav .reset')!;
+  const viewToggle = document.querySelector<HTMLButtonElement>('#nav .view-toggle')!;
   const view = stage.view;
 
   const takeOver = () => {
@@ -127,13 +128,29 @@ export function mountViewControls(stage: Stage, director: Director) {
     { capture: true },
   );
 
+  // The switch offers the view you'd get, and follows the camera when it's orbited by hand.
+  let showedFlat: boolean | null = null;
+  const labelToggle = () => {
+    const flat = director.isFlat;
+    if (flat === showedFlat) return;
+    showedFlat = flat;
+    viewToggle.textContent = flat ? '3D' : '2D';
+    viewToggle.setAttribute('aria-label', flat ? 'Switch to the 3D view' : 'Switch to the top-down view');
+  };
+  labelToggle();
+  stage.onTick(labelToggle);
+  const toggleView = () => director.setFlat(!director.isFlat);
+  viewToggle.addEventListener('click', toggleView);
+
   const resetView = () => {
     director.reframe();
     reset.hidden = true;
   };
   reset.addEventListener('click', resetView);
   addEventListener('keydown', (e) => {
-    if (e.key === '0' && !e.metaKey && !e.ctrlKey) resetView();
+    if (e.metaKey || e.ctrlKey) return;
+    if (e.key === '0') resetView();
+    else if (e.key === 'v') toggleView();
   });
   director.onChange(() => {
     reset.hidden = true;

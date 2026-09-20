@@ -14,7 +14,7 @@ npm install
 npm run dev
 ```
 
-Open the dev server's URL to pick a deck, or go straight to one with `?deck=ota`. Use ← → or click to step through scenes, or add `#<scene number>` to the URL. Click a shape for more detail. Pinch or ctrl+scroll to zoom, scroll or drag to pan, option+drag to orbit, and press `0` to reset the view.
+Open the dev server's URL to pick a deck, or go straight to one with `?deck=ota`. Use ← → or click to step through scenes, or add `#<scene number>` to the URL. Click a shape for more detail. Pinch or ctrl+scroll to zoom, scroll or drag to pan, option+drag to orbit, press `v` (or the 2D/3D switch) to flip between top-down and 3D, and press `0` to reset the view.
 
 ## Writing a diagram
 

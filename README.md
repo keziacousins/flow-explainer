@@ -1,4 +1,4 @@
-# Flow deck
+# Flow Explainer
 
 Animated architecture explainers in three.js. A diagram is stepped through as scenes, like slides. Packets flow between services to show requests, fanouts and responses. Leaning the camera back shows the runtime layer: beneath each logical service hangs a tower of the instances it actually runs as (replicas, shards, partitions), and the same flows play out across those instances.
 
@@ -44,7 +44,7 @@ The builder produces a plain-data model (`src/engine/model.ts`), which a text fo
 
 ## Authorship
 
-The code in this repository was written by Claude, in [Claude Code](https://claude.com/claude-code). My part was direction rather than typing: the prompts, the reviews, and the taste — deciding what to build next, which of several attempts to keep, and what to throw away. Where `CLAUDE.md` records a design decision as settled, that is the shape of it: Claude proposed and implemented, I judged.
+The code in this repository was written by Claude, in [Claude Code](https://claude.com/claude-code). My part was direction: prompts, reviews, and taste: concepts, aesthetics, deciding what to build next, which of several attempts to keep, and what to throw away. 
 
 ## Licence
 
